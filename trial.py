@@ -27,6 +27,8 @@ from src.preprocess import AugmentedDataset
 
 from src.models import EEGNet
 from src.models import EEGNetImproved
+from src.models import EEGNetWithSubject
+from src.models import EEGNetWithSubjectBatchNorm
 from src.models import ShallowConvNet
 from src.models import DeepConvNet
 from src.models import ResNet18
@@ -45,10 +47,11 @@ import wandb
 
 # ダミーデータの作成関数
 def create_dummy_data():
-    X_train = torch.randn(1000, 1, 271, 128)
-    y_train = torch.randint(0, 1854, (1000,))
-    X_test = torch.randn(100, 1, 271, 128)
-    return X_train, y_train, X_test
+    X = torch.randn(1000, 1, 271, 128)
+    y = torch.randint(0, 1854, (1000,))
+    # X_test = torch.randn(100, 1, 271, 128)
+    subject_idxs_train = torch.randint(0, 4, (1000,))
+    return TensorDataset(X, y, subject_idxs_train)
 
 def print_tensor_info(tensor, tensor_name):
     print(f"{tensor_name}のShape:", tensor.shape)
@@ -90,18 +93,21 @@ def load_data(data_dir, force_preprocess):
         X = torch.tensor(preprocess_eeg_data(X.numpy()), dtype=torch.float32).unsqueeze(1)
         torch.save(X, preprocessed_data_path)
 
-    dataset = TensorDataset(X, y)
+    dataset = TensorDataset(X, y, subject_idxs_train)
 
     print("前処理後：")
     print_tensor_info(X, "X")
     print_tensor_info(y, "y")
     print_tensor_info(subject_idxs_train, "subject_idxs_train")
+    print("データセットのShape:", dataset[0][0].shape)
 
     return dataset
 
 model_classes = {
     'EEGNet': EEGNet,
     'EEGNetImproved': EEGNetImproved,
+    'EEGNetWithSubject': EEGNetWithSubject,
+    'EEGNetWithSubjectBatchNorm': EEGNetWithSubjectBatchNorm,
     'ShallowConvNet': ShallowConvNet,
     'DeepConvNet': DeepConvNet,
     'ResNet18': ResNet18,
@@ -121,10 +127,10 @@ def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, optimiz
 
     # トレーニングフェーズ
     model.train()
-    for X, y in tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.num_epochs} Training'):
-        X, y = X.to(device), y.to(device)
+    for X, y, subject_idxs in tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.num_epochs} Training'):
+        X, y, subject_idxs = X.to(device), y.to(device), subject_idxs.to(device)
 
-        y_pred = model(X)
+        y_pred = model(X, subject_idxs)
         loss = F.cross_entropy(y_pred, y)
         train_loss.append(loss.item())
 
@@ -137,11 +143,11 @@ def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, optimiz
 
     # 検証フェーズ
     model.eval()
-    for X, y in tqdm(val_loader, desc="Validation"):
-        X, y = X.to(device), y.to(device)
+    for X, y, subject_idxs in tqdm(val_loader, desc="Validation"):
+        X, y, subject_idxs = X.to(device), y.to(device), subject_idxs.to(device)
 
         with torch.no_grad():
-            y_pred = model(X)
+            y_pred = model(X, subject_idxs)
 
         val_loss.append(F.cross_entropy(y_pred, y).item())
         val_acc.append(accuracy(y_pred, y).item())
@@ -226,8 +232,6 @@ def run(cfg: DictConfig):
     start_time = time.time()
     set_seed(cfg.seed)
     logdir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    # if cfg.output_dir:
-    #     logdir = cfg.output_dir
     print(f"Log directory  : {logdir}")
     save_folder_name = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
     
@@ -240,8 +244,7 @@ def run(cfg: DictConfig):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     if cfg.dry_run:
-        X_train, y_train, X_test = create_dummy_data()
-        dataset = TensorDataset(X_train, y_train)
+        dataset = create_dummy_data()
     else:
         data_dir = cfg.data_dir
         dataset = load_data(data_dir, cfg.force_preprocess)
@@ -261,7 +264,7 @@ def run(cfg: DictConfig):
     print("------------------------")
     print(f'Training {cfg.model_name}')
 
-    # 交差検証ありなし
+    # 交差検証なし
     if not cfg.use_cv:
         # KFoldを使ってデータセットを分割
         kf = KFold(n_splits=cfg.n_splits, shuffle=True)
@@ -282,6 +285,8 @@ def run(cfg: DictConfig):
         # モデルの定義
         if cfg.model_name == "EEGNet" or cfg.model_name == "EEGNetImproved":
             model = ModelClass(num_classes=cfg.num_classes, dropout_rate=cfg.dropout_rate).to(device)
+        elif cfg.model_name == "EEGNetWithSubject" or cfg.model_name == "EEGNetWithSubjectBatchNorm":
+            model = ModelClass(num_classes=cfg.num_classes, num_subjects=cfg.num_subjects, dropout_rate=cfg.dropout_rate).to(device)
         elif cfg.model_name == "EEGTransformerEncoder":
             model = EEGTransformerEncoder(num_classes=cfg.num_classes, num_channels=cfg.num_channels, num_timepoints=cfg.num_timepoints).to(device)
         else:
@@ -300,7 +305,7 @@ def run(cfg: DictConfig):
         max_val_acc = train_and_evaluate(model, train_loader, val_loader, optimizer, scheduler, early_stopping, accuracy, device, cfg, save_folder_name)
         max_val_acc_list = [max_val_acc]
         
-    else:
+    else: # 交差検証あり
 
         if cfg.splitter_name == 'KFold':
             kf =  KFold(n_splits=cfg.n_splits, shuffle=True)
@@ -314,7 +319,7 @@ def run(cfg: DictConfig):
         wandb.log({'total_val_acc_mean': mean_acc})
     cprint(f"Total Val Acc mean = {mean_acc} !", "cyan")
 
-    if not cfg.dry_run:
+    if (not cfg.dry_run) and cfg.use_cv:
         # モデルの定義
 
         model = ModelClass(num_classes=cfg.num_classes).to(device)

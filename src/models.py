@@ -97,6 +97,152 @@ class EEGNetImproved(nn.Module):
         x = self.classify(x)
         return x
 
+class EEGNetWithSubject(nn.Module):
+    def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5, num_subjects=4):
+        super(EEGNetWithSubject, self).__init__()
+        
+        self.subject_embedding = nn.Embedding(num_subjects, 16)  # 被験者IDのエンベッディング層
+
+        self.firstconv = nn.Sequential(
+            nn.Conv2d(1, 32, (1, 51), stride=(1, 1), padding=(0, 25), bias=False),
+            nn.BatchNorm2d(32),
+            nn.ELU(),
+            nn.MaxPool2d((1, 2))
+        )
+
+        self.depthwiseConv = nn.Sequential(
+            nn.Conv2d(32, 64, (Chans, 1), stride=(1, 1), groups=32, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv1 = nn.Sequential(
+            nn.Conv2d(64, 128, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            nn.BatchNorm2d(128),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv2 = nn.Sequential(
+            nn.Conv2d(128, 256, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            nn.BatchNorm2d(256),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.flattened_size = 256 * ((Samples // 2 // 2 // 2 // 2))
+        self.classify = nn.Sequential(
+            nn.Linear(self.flattened_size + 16, 512),  # 埋め込みベクトルのサイズを追加
+            nn.ELU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(512, num_classes)
+        )
+
+    def forward(self, x, subject_idxs):
+        subject_embeds = self.subject_embedding(subject_idxs)
+        x = self.firstconv(x)
+        x = self.depthwiseConv(x)
+        x = self.separableConv1(x)
+        x = self.separableConv2(x)
+        x = x.view(x.size(0), -1)
+        x = torch.cat((x, subject_embeds), dim=1)
+        x = self.classify(x)
+        return x
+
+
+class SubjectBatchNorm(nn.Module):
+    def __init__(self, num_features, num_subjects):
+        super(SubjectBatchNorm, self).__init__()
+        self.num_subjects = num_subjects
+        self.bns = nn.ModuleList([nn.BatchNorm2d(num_features) for _ in range(num_subjects)])
+
+    def forward(self, x, subject_idx):
+        out = torch.zeros_like(x)
+        for i in range(self.num_subjects):
+            mask = (subject_idx == i).unsqueeze(1).unsqueeze(2).unsqueeze(3).float()
+            out += self.bns[i](x) * mask
+        return out
+
+class EEGNetWithSubjectBatchNorm(nn.Module):
+    def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5, num_subjects=4):
+        super(EEGNetWithSubjectBatchNorm, self).__init__()
+        
+        self.subject_embedding = nn.Embedding(num_subjects, 16)
+
+        self.firstconv = nn.Sequential(
+            nn.Conv2d(1, 32, (1, 51), stride=(1, 1), padding=(0, 25), bias=False),
+            SubjectBatchNorm(32, num_subjects),
+            nn.ELU(),
+            nn.MaxPool2d((1, 2))
+        )
+
+        self.depthwiseConv = nn.Sequential(
+            nn.Conv2d(32, 64, (Chans, 1), stride=(1, 1), groups=32, bias=False),
+            SubjectBatchNorm(64, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv1 = nn.Sequential(
+            nn.Conv2d(64, 128, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            SubjectBatchNorm(128, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv2 = nn.Sequential(
+            nn.Conv2d(128, 256, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            SubjectBatchNorm(256, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.flattened_size = 256 * ((Samples // 2 // 2 // 2 // 2))
+        self.classify = nn.Sequential(
+            nn.Linear(self.flattened_size + 16, 512),
+            nn.ELU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(512, num_classes)
+        )
+
+    def forward(self, x, subject_idxs):
+        subject_embeds = self.subject_embedding(subject_idxs)
+        x = self.firstconv[0](x)
+        x = self.firstconv[1](x, subject_idxs)
+        x = self.firstconv[2](x)
+        x = self.firstconv[3](x)
+        
+        x = self.depthwiseConv[0](x)
+        x = self.depthwiseConv[1](x, subject_idxs)
+        x = self.depthwiseConv[2](x)
+        x = self.depthwiseConv[3](x)
+        x = self.depthwiseConv[4](x)
+        
+        x = self.separableConv1[0](x)
+        x = self.separableConv1[1](x, subject_idxs)
+        x = self.separableConv1[2](x)
+        x = self.separableConv1[3](x)
+        x = self.separableConv1[4](x)
+        
+        x = self.separableConv2[0](x)
+        x = self.separableConv2[1](x, subject_idxs)
+        x = self.separableConv2[2](x)
+        x = self.separableConv2[3](x)
+        x = self.separableConv2[4](x)
+        
+        x = x.view(x.size(0), -1)
+        x = torch.cat((x, subject_embeds), dim=1)
+        x = self.classify(x)
+        return x
+
+
 class EEGTransformerEncoder(nn.Module):
     def __init__(self, num_classes, num_channels, num_timepoints, d_model=512, nhead=8, num_encoder_layers=6, dim_feedforward=2048, dropout=0.1):
         """

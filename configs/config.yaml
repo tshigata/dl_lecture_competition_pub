@@ -1,15 +1,16 @@
 # パラメータ設定
-force_preprocess: True
+force_preprocess: False
 num_classes: 1854
+num_subjects: 4
 num_epochs: 50
 num_batches: 32
 learning_rate: 0.001
 num_patience: 7
 
-use_cv: False
-n_splits: 5
+use_cv: True
+n_splits: 10
 
-dry_run: True
+dry_run: False
 
 
 data_augmentation_train: False
@@ -20,7 +21,7 @@ splitter_name: KFold
 
 optimizer: AdamW
 
-model_name: EEGNetImproved
+model_name: EEGNetWithSubjectBatchNorm
 dropout_rate: 0.5
 
 
@@ -37,7 +38,7 @@ device: cuda:0
 num_workers: 4
 seed: 3711
 
-use_wandb: False
+use_wandb: True
 
 data_dir: data
 
