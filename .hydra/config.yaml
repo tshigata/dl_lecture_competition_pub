@@ -1,0 +1,21 @@
+dataset:
+  num_classes: 1854
+  num_channels: 271
+  num_timepoints: 281
+  fs: 281
+  data_dir: data
+data_files:
+  train_val_X: train_val_X.pt
+  train_val_y: train_val_y.pt
+  train_subject_idxs: train_subject_idxs.pt
+training:
+  splitter_name: KFold
+  optimizer: AdamW
+  dropout_rate: 0.5
+  device: cuda:0
+  num_workers: 4
+  seed: 3711
+  use_dryrun: false
+other:
+  batch_size: 32
+  num_epochs: 20

@@ -44,6 +44,101 @@ class EEGNet(nn.Module):
         x = self.classify(x)
         return x
 
+class EEGNetImproved(nn.Module):
+    def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5):
+        super(EEGNetImproved, self).__init__()
+
+        self.firstconv = nn.Sequential(
+            nn.Conv2d(1, 32, (1, 51), stride=(1, 1), padding=(0, 25), bias=False),
+            nn.BatchNorm2d(32),
+            nn.ELU(),
+            nn.MaxPool2d((1, 2))  # 適切なプーリングサイズに調整
+        )
+
+        self.depthwiseConv = nn.Sequential(
+            nn.Conv2d(32, 64, (Chans, 1), stride=(1, 1), groups=32, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),  # プーリングサイズを調整
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv1 = nn.Sequential(
+            nn.Conv2d(64, 128, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            nn.BatchNorm2d(128),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),  # プーリングサイズを調整
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv2 = nn.Sequential(
+            nn.Conv2d(128, 256, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            nn.BatchNorm2d(256),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),  # プーリングサイズを調整
+            nn.Dropout(dropout_rate)
+        )
+
+        # プーリング層の変更に合わせてflattened_sizeを再計算
+        self.flattened_size = 256 * ((Samples // 2 // 2 // 2 // 2))  
+        self.classify = nn.Sequential(
+            nn.Linear(self.flattened_size, 512),
+            nn.ELU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(512, num_classes)
+        )
+
+    def forward(self, x):
+        x = self.firstconv(x)
+        x = self.depthwiseConv(x)
+        x = self.separableConv1(x)
+        x = self.separableConv2(x)
+        x = x.view(x.size(0), -1)
+        x = self.classify(x)
+        return x
+
+class EEGTransformerEncoder(nn.Module):
+    def __init__(self, num_classes, num_channels, num_timepoints, d_model=512, nhead=8, num_encoder_layers=6, dim_feedforward=2048, dropout=0.1):
+        """
+        EEGTransformerEncoderの初期化。
+        
+        :param num_classes: 分類するクラスの数
+        :param num_channels: 脳波データのチャンネル数
+        :param num_timepoints: 各チャンネルの時間点の数
+        :param d_model: 埋め込みの次元数
+        :param nhead: マルチヘッドアテンションのヘッド数
+        :param num_encoder_layers: エンコーダレイヤーの数
+        :param dim_feedforward: フィードフォワードネットワークの次元数
+        :param dropout: ドロップアウト率
+        """
+        super(EEGTransformerEncoder, self).__init__()
+        self.num_channels = num_channels
+        self.num_timepoints = num_timepoints
+        self.d_model = d_model
+        self.nhead = nhead
+
+        self.embedding = nn.Linear(num_channels * num_timepoints, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, dropout=dropout,batch_first=True)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
+        self.fc_out = nn.Linear(d_model, num_classes)
+
+    def forward(self, x):
+        """
+        EEGTransformerEncoderのフォワードパス。
+        
+        :param x: 入力データ。形状は(batch_size, num_channels, num_timepoints)
+        """
+        # 入力xの形状を(batch_size, num_channels*num_timepoints)に変更
+        x = x.view(x.size(0), -1)
+        # データを埋め込み空間に投影
+        x = self.embedding(x)
+        # 埋め込みベクトルをエンコーダに通す
+        x = self.transformer_encoder(x.unsqueeze(1))
+        # クラス分類のための線形層
+        x = self.fc_out(x[:, 0, :])
+        # return F.log_softmax(x, dim=1)
+        return x
+
 
 class ShallowConvNet(nn.Module):
     def __init__(self, num_classes, num_channels, input_time_length):

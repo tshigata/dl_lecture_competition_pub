@@ -26,6 +26,7 @@ from src.preprocess import AugmentedSubset
 from src.preprocess import AugmentedDataset
 
 from src.models import EEGNet
+from src.models import EEGNetImproved
 from src.models import ShallowConvNet
 from src.models import DeepConvNet
 from src.models import ResNet18
@@ -34,6 +35,7 @@ from src.models import CNNLSTM
 from src.models import DenseNet
 from src.models import GRUModel
 from src.models import InceptionNet
+from src.models import EEGTransformerEncoder
 from src.utils import set_seed
 
 import hydra
@@ -49,10 +51,9 @@ def create_dummy_data():
     return X_train, y_train, X_test
 
 def print_tensor_info(tensor, tensor_name):
-    print(f"{tensor_name}のサイズ:", tensor.size())
     print(f"{tensor_name}のShape:", tensor.shape)
 
-def load_data(data_dir):
+def load_data(data_dir, force_preprocess):
     train_X = torch.load(os.path.join(data_dir, 'train_X.pt'))
     val_X = torch.load(os.path.join(data_dir, 'val_X.pt'))
     train_y = torch.load(os.path.join(data_dir, 'train_y.pt'))
@@ -74,14 +75,14 @@ def load_data(data_dir):
     subject_idxs_train = torch.cat((train_subject_idxs, val_subject_idxs), dim=0)
 
     print("結合後：")
-    print(X.shape)
-    print(y.shape)
-    print(subject_idxs_train.shape)
+    print_tensor_info(X, "X")
+    print_tensor_info(y, "y")
+    print_tensor_info(subject_idxs_train, "subject_idxs_train")
 
     # 前処理済みデータの保存パス
     preprocessed_data_path = os.path.join(data_dir, 'preprocessed_data.pt')
 
-    if os.path.exists(preprocessed_data_path):
+    if (not force_preprocess) and os.path.exists(preprocessed_data_path):
         # 前処理済みデータが存在する場合、ロードする
         X = torch.load(preprocessed_data_path)
     else:
@@ -92,14 +93,15 @@ def load_data(data_dir):
     dataset = TensorDataset(X, y)
 
     print("前処理後：")
-    print(X.shape)
-    print(y.shape)
-    print(subject_idxs_train.shape)
+    print_tensor_info(X, "X")
+    print_tensor_info(y, "y")
+    print_tensor_info(subject_idxs_train, "subject_idxs_train")
 
     return dataset
 
 model_classes = {
     'EEGNet': EEGNet,
+    'EEGNetImproved': EEGNetImproved,
     'ShallowConvNet': ShallowConvNet,
     'DeepConvNet': DeepConvNet,
     'ResNet18': ResNet18,
@@ -107,7 +109,8 @@ model_classes = {
     'CNNLSTM': CNNLSTM,
     'DenseNet': DenseNet,
     'GRUModel': GRUModel,
-    'InceptionNet': InceptionNet
+    'InceptionNet': InceptionNet,
+    'EEGTransformerEncoder': EEGTransformerEncoder,
 }
 
 # 1エポック分の処理を関数化
@@ -219,104 +222,103 @@ def cross_validation_training(kf, dataset, ModelClass, accuracy, device, args, s
     return max_val_acc_list
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
-def run(args: DictConfig):
+def run(cfg: DictConfig):
     start_time = time.time()
-    from torch.utils.data import DataLoader, Subset, TensorDataset
-    set_seed(args.seed)
+    set_seed(cfg.seed)
     logdir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    # if args.output_dir:
-    #     logdir = args.output_dir
+    # if cfg.output_dir:
+    #     logdir = cfg.output_dir
     print(f"Log directory  : {logdir}")
     save_folder_name = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
     
-    if args.use_wandb:
+    if cfg.use_wandb:
         # DictConfigを通常の辞書に変換
-        config_dict = OmegaConf.to_container(args, resolve=True)
+        config_dict = OmegaConf.to_container(cfg, resolve=True)
         wandb.init(mode="online", dir=logdir, project="MEG-classification", config=config_dict)
          
     # デバイスの設定
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    if args.dry_run:
+    if cfg.dry_run:
         X_train, y_train, X_test = create_dummy_data()
         dataset = TensorDataset(X_train, y_train)
     else:
-        data_dir = args.data_dir
-        dataset = load_data(data_dir)
+        data_dir = cfg.data_dir
+        dataset = load_data(data_dir, cfg.force_preprocess)
         
     accuracy = Accuracy(
-        task="multiclass", num_classes=args.num_classes, top_k=10
+        task="multiclass", num_classes=cfg.num_classes, top_k=10
     ).to(device)
-
 
 
     max_val_acc = 0
     max_val_acc_list = []
 
-    if args.model_name not in model_classes:
-        raise ValueError(f"モデル名 {args.model_name} は無効です。利用可能なモデル名: {list(model_classes.keys())}")
+    if cfg.model_name not in model_classes:
+        raise ValueError(f"モデル名 {cfg.model_name} は無効です。利用可能なモデル名: {list(model_classes.keys())}")
     
-    ModelClass = model_classes[args.model_name]
+    ModelClass = model_classes[cfg.model_name]
     print("------------------------")
-    print(f'Training {args.model_name}')
+    print(f'Training {cfg.model_name}')
 
     # 交差検証ありなし
-    if not args.use_cv:
+    if not cfg.use_cv:
         # KFoldを使ってデータセットを分割
-        kf = KFold(n_splits=args.n_splits, shuffle=True)
+        kf = KFold(n_splits=cfg.n_splits, shuffle=True)
         train_indices, val_indices = next(kf.split(dataset))
     
-        cprint(f'Single fold ({args.n_splits-1}:{1} split)', "yellow")
+        cprint(f'Single fold ({cfg.n_splits-1}:{1} split)', "yellow")
     
-        if args.data_augmentation_train:
-            train_data = AugmentedDataset(Subset(dataset, train_indices), augmentation_prob=args.augmentation_prob)
+        if cfg.data_augmentation_train:
+            train_data = AugmentedDataset(Subset(dataset, train_indices), augmentation_prob=cfg.augmentation_prob)
         else:
             train_data = Subset(dataset, train_indices)
         
         val_data = Subset(dataset, val_indices)
     
-        train_loader = DataLoader(train_data, batch_size=args.num_batches, shuffle=True)
-        val_loader = DataLoader(val_data, batch_size=args.num_batches, shuffle=False)
+        train_loader = DataLoader(train_data, batch_size=cfg.num_batches, shuffle=True)
+        val_loader = DataLoader(val_data, batch_size=cfg.num_batches, shuffle=False)
     
         # モデルの定義
-        if args.model_name == "EEGNet":
-            model = ModelClass(num_classes=args.num_classes, dropout_rate=args.dropout_rate).to(device)
+        if cfg.model_name == "EEGNet" or cfg.model_name == "EEGNetImproved":
+            model = ModelClass(num_classes=cfg.num_classes, dropout_rate=cfg.dropout_rate).to(device)
+        elif cfg.model_name == "EEGTransformerEncoder":
+            model = EEGTransformerEncoder(num_classes=cfg.num_classes, num_channels=cfg.num_channels, num_timepoints=cfg.num_timepoints).to(device)
         else:
-            model = ModelClass(num_classes=args.num_classes).to(device)
+            model = ModelClass(num_classes=cfg.num_classes).to(device)
     
         # 損失関数と最適化関数
-        if args.optimizer == "Adam":
-            optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+        if cfg.optimizer == "Adam":
+            optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
         else:
-            optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=0.02)
+            optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=0.02)
 
         scheduler = CosineLRScheduler(optimizer, t_initial=100, lr_min=1e-6,
                                       warmup_t=3, warmup_lr_init=1e-6, warmup_prefix=True)
-        early_stopping = EarlyStopping(patience=args.num_patience, verbose=True)
+        early_stopping = EarlyStopping(patience=cfg.num_patience, verbose=True)
     
-        max_val_acc = train_and_evaluate(model, train_loader, val_loader, optimizer, scheduler, early_stopping, accuracy, device, args, save_folder_name)
+        max_val_acc = train_and_evaluate(model, train_loader, val_loader, optimizer, scheduler, early_stopping, accuracy, device, cfg, save_folder_name)
         max_val_acc_list = [max_val_acc]
         
     else:
 
-        if args.splitter_name == 'KFold':
-            kf =  KFold(n_splits=args.n_splits, shuffle=True)
+        if cfg.splitter_name == 'KFold':
+            kf =  KFold(n_splits=cfg.n_splits, shuffle=True)
         else:
-            kf = StratifiedKFold(n_splits=args.n_splits, shuffle=True)
-        max_val_acc_list = cross_validation_training(kf, dataset, ModelClass, accuracy, device, args, save_folder_name)
+            kf = StratifiedKFold(n_splits=cfg.n_splits, shuffle=True)
+        max_val_acc_list = cross_validation_training(kf, dataset, ModelClass, accuracy, device, cfg, save_folder_name)
 
     mean_acc = np.mean(max_val_acc_list)
 
-    if args.use_wandb:
+    if cfg.use_wandb:
         wandb.log({'total_val_acc_mean': mean_acc})
     cprint(f"Total Val Acc mean = {mean_acc} !", "cyan")
 
-    if not args.dry_run:
+    if not cfg.dry_run:
         # モデルの定義
 
-        model = ModelClass(num_classes=args.num_classes).to(device)
+        model = ModelClass(num_classes=cfg.num_classes).to(device)
 
-        from torch.utils.data import TensorDataset, DataLoader
 
         # テストデータを読み込む
         test_X = torch.load('data/test_X.pt')
@@ -325,16 +327,16 @@ def run(args: DictConfig):
 
         # テストデータセットとデータローダーの作成
         test_dataset = TensorDataset(test_X)
-        test_loader = DataLoader(test_dataset, batch_size=args.num_batches, shuffle=False)
+        test_loader = DataLoader(test_dataset, batch_size=cfg.num_batches, shuffle=False)
 
         # 予測結果を格納するリスト
         predictions = []
 
         # モデルの定義
-        model = ModelClass(num_classes=args.num_classes).to(device)
+        model = ModelClass(num_classes=cfg.num_classes).to(device)
 
         # 保存されたモデルのファイル名のリスト
-        model_files = [f'model_best_fold{fold+1}.pt' for fold in range(args.n_splits)]  # 5-Foldの例
+        model_files = [f'model_best_fold{fold+1}.pt' for fold in range(cfg.n_splits)]  # 5-Foldの例
 
         # 各Foldのモデルで予測
         for model_file in model_files:
