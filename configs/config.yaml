@@ -1,13 +1,45 @@
-batch_size: 128
-epochs: 80
-lr: 0.001
+# パラメータ設定
+preprocess: True
+num_classes: 1854
+num_epochs: 50
+num_batches: 32
+learning_rate: 0.001
+num_patience: 7
+
+use_cv: True
+n_splits: 25
+
+dry_run: False
+use_wandb: True
+
+data_augmentation_train: False
+data_augmentation_test: False
+augmentation_prob: 0.2
+
+splitter_name: KFold
+
+optimizer: AdamW
+
+model_name: EEGNet
+dropout_rate: 0.5
+
+
+
+current_rate: 281
+lowcut: 0.5
+highcut: 50
+target_rate: 128
+num_channels: 271  # チャンネル数
+num_timepoints: 128
+fs: 128
 
 device: cuda:0
 num_workers: 4
-seed: 1234
-use_wandb: False
+seed: 3711
+
 
 data_dir: data
+
 
 # Evaluation
 model_path: 
