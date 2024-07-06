@@ -38,7 +38,7 @@ device: cuda:0
 num_workers: 4
 seed: 3711
 
-use_wandb: True
+use_wandb: False
 
 data_dir: data
 

@@ -243,15 +243,15 @@ def run(cfg: DictConfig):
     # デバイスの設定
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    if cfg.dry_run:
-        dataset = create_dummy_data()
-    else:
-        data_dir = cfg.data_dir
-        dataset = load_data(data_dir, cfg.force_preprocess)
+    # if cfg.dry_run:
+    #     dataset = create_dummy_data()
+    # else:
+    #     data_dir = cfg.data_dir
+    #     dataset = load_data(data_dir, cfg.force_preprocess)
         
-    accuracy = Accuracy(
-        task="multiclass", num_classes=cfg.num_classes, top_k=10
-    ).to(device)
+    # accuracy = Accuracy(
+    #     task="multiclass", num_classes=cfg.num_classes, top_k=10
+    # ).to(device)
 
 
     max_val_acc = 0
@@ -264,61 +264,62 @@ def run(cfg: DictConfig):
     print("------------------------")
     print(f'Training {cfg.model_name}')
 
-    # 交差検証なし
-    if not cfg.use_cv:
-        # KFoldを使ってデータセットを分割
-        kf = KFold(n_splits=cfg.n_splits, shuffle=True)
-        train_indices, val_indices = next(kf.split(dataset))
+    # # 交差検証なし
+    # if not cfg.use_cv:
+    #     # KFoldを使ってデータセットを分割
+    #     kf = KFold(n_splits=cfg.n_splits, shuffle=True)
+    #     train_indices, val_indices = next(kf.split(dataset))
     
-        cprint(f'Single fold ({cfg.n_splits-1}:{1} split)', "yellow")
+    #     cprint(f'Single fold ({cfg.n_splits-1}:{1} split)', "yellow")
     
-        if cfg.data_augmentation_train:
-            train_data = AugmentedDataset(Subset(dataset, train_indices), augmentation_prob=cfg.augmentation_prob)
-        else:
-            train_data = Subset(dataset, train_indices)
+    #     if cfg.data_augmentation_train:
+    #         train_data = AugmentedDataset(Subset(dataset, train_indices), augmentation_prob=cfg.augmentation_prob)
+    #     else:
+    #         train_data = Subset(dataset, train_indices)
         
-        val_data = Subset(dataset, val_indices)
+    #     val_data = Subset(dataset, val_indices)
     
-        train_loader = DataLoader(train_data, batch_size=cfg.num_batches, shuffle=True)
-        val_loader = DataLoader(val_data, batch_size=cfg.num_batches, shuffle=False)
+    #     train_loader = DataLoader(train_data, batch_size=cfg.num_batches, shuffle=True)
+    #     val_loader = DataLoader(val_data, batch_size=cfg.num_batches, shuffle=False)
     
-        # モデルの定義
-        if cfg.model_name == "EEGNet" or cfg.model_name == "EEGNetImproved":
-            model = ModelClass(num_classes=cfg.num_classes, dropout_rate=cfg.dropout_rate).to(device)
-        elif cfg.model_name == "EEGNetWithSubject" or cfg.model_name == "EEGNetWithSubjectBatchNorm":
-            model = ModelClass(num_classes=cfg.num_classes, num_subjects=cfg.num_subjects, dropout_rate=cfg.dropout_rate).to(device)
-        elif cfg.model_name == "EEGTransformerEncoder":
-            model = EEGTransformerEncoder(num_classes=cfg.num_classes, num_channels=cfg.num_channels, num_timepoints=cfg.num_timepoints).to(device)
-        else:
-            model = ModelClass(num_classes=cfg.num_classes).to(device)
+    #     # モデルの定義
+    #     if cfg.model_name == "EEGNet" or cfg.model_name == "EEGNetImproved":
+    #         model = ModelClass(num_classes=cfg.num_classes, dropout_rate=cfg.dropout_rate).to(device)
+    #     elif cfg.model_name == "EEGNetWithSubject" or cfg.model_name == "EEGNetWithSubjectBatchNorm":
+    #         model = ModelClass(num_classes=cfg.num_classes, num_subjects=cfg.num_subjects, dropout_rate=cfg.dropout_rate).to(device)
+    #     elif cfg.model_name == "EEGTransformerEncoder":
+    #         model = EEGTransformerEncoder(num_classes=cfg.num_classes, num_channels=cfg.num_channels, num_timepoints=cfg.num_timepoints).to(device)
+    #     else:
+    #         model = ModelClass(num_classes=cfg.num_classes).to(device)
     
-        # 損失関数と最適化関数
-        if cfg.optimizer == "Adam":
-            optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
-        else:
-            optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=0.02)
+    #     # 損失関数と最適化関数
+    #     if cfg.optimizer == "Adam":
+    #         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
+    #     else:
+    #         optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=0.02)
 
-        scheduler = CosineLRScheduler(optimizer, t_initial=100, lr_min=1e-6,
-                                      warmup_t=3, warmup_lr_init=1e-6, warmup_prefix=True)
-        early_stopping = EarlyStopping(patience=cfg.num_patience, verbose=True)
+    #     scheduler = CosineLRScheduler(optimizer, t_initial=100, lr_min=1e-6,
+    #                                   warmup_t=3, warmup_lr_init=1e-6, warmup_prefix=True)
+    #     early_stopping = EarlyStopping(patience=cfg.num_patience, verbose=True)
     
-        max_val_acc = train_and_evaluate(model, train_loader, val_loader, optimizer, scheduler, early_stopping, accuracy, device, cfg, save_folder_name)
-        max_val_acc_list = [max_val_acc]
+    #     max_val_acc = train_and_evaluate(model, train_loader, val_loader, optimizer, scheduler, early_stopping, accuracy, device, cfg, save_folder_name)
+    #     max_val_acc_list = [max_val_acc]
         
-    else: # 交差検証あり
+    # else: # 交差検証あり
 
-        if cfg.splitter_name == 'KFold':
-            kf =  KFold(n_splits=cfg.n_splits, shuffle=True)
-        else:
-            kf = StratifiedKFold(n_splits=cfg.n_splits, shuffle=True)
-        max_val_acc_list = cross_validation_training(kf, dataset, ModelClass, accuracy, device, cfg, save_folder_name)
+    #     if cfg.splitter_name == 'KFold':
+    #         kf =  KFold(n_splits=cfg.n_splits, shuffle=True)
+    #     else:
+    #         kf = StratifiedKFold(n_splits=cfg.n_splits, shuffle=True)
+    #     max_val_acc_list = cross_validation_training(kf, dataset, ModelClass, accuracy, device, cfg, save_folder_name)
 
-    mean_acc = np.mean(max_val_acc_list)
+    # mean_acc = np.mean(max_val_acc_list)
 
-    if cfg.use_wandb:
-        wandb.log({'total_val_acc_mean': mean_acc})
-    cprint(f"Total Val Acc mean = {mean_acc} !", "cyan")
+    # if cfg.use_wandb:
+    #     wandb.log({'total_val_acc_mean': mean_acc})
+    # cprint(f"Total Val Acc mean = {mean_acc} !", "cyan")
 
+    save_folder_name = "outputs/2024-07-06/02-11-26"
     if (not cfg.dry_run) and cfg.use_cv:
         # モデルの定義
 
@@ -367,6 +368,7 @@ def run(cfg: DictConfig):
         avg_predictions = np.mean(predictions, axis=0)
 
         # 平均化された予測結果を保存
+        mean_acc = 0.05538
         submission_file_path = os.path.join(save_folder_name, f"submission_{mean_acc:.5f}.npy")
         np.save(submission_file_path, avg_predictions)
         cprint(f"Submission {avg_predictions.shape} saved at {submission_file_path}", "cyan")
