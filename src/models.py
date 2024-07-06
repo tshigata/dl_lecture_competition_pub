@@ -3,12 +3,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 import torchvision.models as models
+from termcolor import cprint
 
 # EEGNetのモデル定義
 class EEGNet(nn.Module):
     def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.25):
         super(EEGNet, self).__init__()
-        print(f"dropout_rate = {dropout_rate}")
+        cprint(f"dropout_rate = {dropout_rate}", "light_blue")
         
         self.firstconv = nn.Sequential(
             nn.Conv2d(1, 16, (1, 51), stride=(1, 1), padding=(0, 25), bias=False),

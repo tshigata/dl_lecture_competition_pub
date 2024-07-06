@@ -103,22 +103,6 @@ def load_data(data_dir, force_preprocess):
 
     return dataset
 
-# model_classes = {
-#     'EEGNet': EEGNet,
-#     'EEGNetImproved': EEGNetImproved,
-#     'EEGNetWithSubject': EEGNetWithSubject,
-#     'EEGNetWithSubjectBatchNorm': EEGNetWithSubjectBatchNorm,
-#     'ShallowConvNet': ShallowConvNet,
-#     'DeepConvNet': DeepConvNet,
-#     'ResNet18': ResNet18,
-#     'LSTMModel': LSTMModel,
-#     'CNNLSTM': CNNLSTM,
-#     'DenseNet': DenseNet,
-#     'GRUModel': GRUModel,
-#     'InceptionNet': InceptionNet,
-#     'EEGTransformerEncoder': EEGTransformerEncoder,
-# }
-
 def model_factory(models_config, selected_model_index):
     selected_model_config = models_config[selected_model_index]
     model_class = globals()[selected_model_config['name']]
@@ -217,7 +201,7 @@ def cross_validation_training(dataset, output_folder, cfg):
 
         val_data = Subset(dataset, val_index)
         
-        print(f"Train data: {len(train_data)} | Val data: {len(val_data)} | Batch size: {cfg.num_batches}")
+        cprint(f"Train data: {len(train_data)} | Val data: {len(val_data)} | Batch size: {cfg.num_batches}", "light_blue")
         train_loader = DataLoader(train_data, batch_size=cfg.num_batches, shuffle=True)
         val_loader = DataLoader(val_data, batch_size=cfg.num_batches, shuffle=False)
 
@@ -276,58 +260,6 @@ def run(cfg: DictConfig):
     
     max_val_acc_list = cross_validation_training(dataset, output_folder, cfg)
 
-    # if cfg.model_name not in model_classes:
-    #     raise ValueError(f"モデル名 {cfg.model_name} は無効です。利用可能なモデル名: {list(model_classes.keys())}")
-    
-    # ModelClass = model_classes[cfg.model_name]
-    # print("------------------------")
-    # print(f'Training {cfg.model_name}')
-
-    # # 交差検証なし
-    # if not cfg.use_cv:
-    #     # KFoldを使ってデータセットを分割
-    #     kf = KFold(n_splits=cfg.n_splits, shuffle=True)
-    #     train_indices, val_indices = next(kf.split(dataset))
-    
-    #     cprint(f'Single fold ({cfg.n_splits-1}:{1} split)', "yellow")
-    
-    #     if cfg.data_augmentation_train:
-    #         train_data = AugmentedDataset(Subset(dataset, train_indices), augmentation_prob=cfg.augmentation_prob)
-    #     else:
-    #         train_data = Subset(dataset, train_indices)
-        
-    #     val_data = Subset(dataset, val_indices)
-    
-    #     train_loader = DataLoader(train_data, batch_size=cfg.num_batches, shuffle=True)
-    #     val_loader = DataLoader(val_data, batch_size=cfg.num_batches, shuffle=False)
-    
-    #     # モデルの定義
-    #     if cfg.model_name == "EEGNet" or cfg.model_name == "EEGNetImproved":
-    #         model = ModelClass(num_classes=cfg.num_classes, dropout_rate=cfg.dropout_rate).to(device)
-    #     elif cfg.model_name == "EEGNetWithSubject" or cfg.model_name == "EEGNetWithSubjectBatchNorm":
-    #         model = ModelClass(num_classes=cfg.num_classes, num_subjects=cfg.num_subjects, dropout_rate=cfg.dropout_rate).to(device)
-    #     elif cfg.model_name == "EEGTransformerEncoder":
-    #         model = EEGTransformerEncoder(num_classes=cfg.num_classes, num_channels=cfg.num_channels, num_timepoints=cfg.num_timepoints).to(device)
-    #     else:
-    #         model = ModelClass(num_classes=cfg.num_classes).to(device)
-    
-    #     # 損失関数と最適化関数
-    #     if cfg.optimizer == "Adam":
-    #         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
-    #     else:
-    #         optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=0.02)
-
-    #     scheduler = CosineLRScheduler(optimizer, t_initial=100, lr_min=1e-6,
-    #                                   warmup_t=3, warmup_lr_init=1e-6, warmup_prefix=True)
-    #     early_stopping = EarlyStopping(patience=cfg.num_patience, verbose=True)
-    
-    #     max_val_acc = train_and_evaluate(model, train_loader, val_loader, optimizer, scheduler, early_stopping, accuracy, device, cfg, save_folder_name)
-    #     max_val_acc_list = [max_val_acc]
-        
-    # else: # 交差検証あり
-
-    #     max_val_acc_list = cross_validation_training(dataset, cfg)
-
     mean_acc = np.mean(max_val_acc_list)
 
     if cfg.use_wandb:
@@ -337,13 +269,9 @@ def run(cfg: DictConfig):
     if (not cfg.dry_run) and cfg.use_cv:
         # モデルの定義
 
-        model = ModelClass(num_classes=cfg.num_classes).to(device)
-
-
         # テストデータを読み込む
         test_X = torch.load('data/test_X.pt')
         test_subject_idxs = torch.load('data/test_subject_idxs.pt')
-
 
         test_X = torch.tensor(preprocess_eeg_data(test_X.numpy()), dtype=torch.float32).unsqueeze(1)
 
@@ -355,7 +283,9 @@ def run(cfg: DictConfig):
         predictions = []
 
         # モデルの定義
-        model = ModelClass(num_classes=cfg.num_classes).to(device)
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model = model_factory(cfg.model, cfg.selected_model_index).to(device)
+        print(model)
 
         # 保存されたモデルのファイル名のリスト
         model_files = [f'model_best_fold{fold+1}.pt' for fold in range(cfg.n_splits)]  # 5-Foldの例
@@ -363,7 +293,7 @@ def run(cfg: DictConfig):
         # 各Foldのモデルで予測
         for model_file in model_files:
             # モデルのロード
-            model.load_state_dict(torch.load(os.path.join(save_folder_name, model_file), map_location=device))
+            model.load_state_dict(torch.load(os.path.join(output_folder, model_file), map_location=device))
             model.eval()
             
             fold_predictions = []
@@ -382,7 +312,7 @@ def run(cfg: DictConfig):
         avg_predictions = np.mean(predictions, axis=0)
 
         # 平均化された予測結果を保存
-        submission_file_path = os.path.join(save_folder_name, f"submission_{mean_acc:.5f}.npy")
+        submission_file_path = os.path.join(output_folder, f"submission_{mean_acc:.5f}.npy")
         np.save(submission_file_path, avg_predictions)
         cprint(f"Submission {avg_predictions.shape} saved at {submission_file_path}", "cyan")
     end_time = time.time()
