@@ -1,5 +1,12 @@
-# パラメータ設定
-force_preprocess: False
+wandb:
+  project: "MEG-classification"
+  comment: "EEGNetでハイパラ比較"
+
+dry_run: False
+use_wandb: True
+device: cuda:0
+num_workers: 4
+seed: 3711
 num_classes: 1854
 num_subjects: 4
 num_epochs: 50
@@ -7,25 +14,15 @@ num_batches: 32
 learning_rate: 0.001
 num_patience: 7
 
-use_cv: True
-n_splits: 10
 
-dry_run: False
-
-
+# データセット
+data_dir: data
 data_augmentation_train: False
 data_augmentation_test: False
 augmentation_prob: 0.2
 
-splitter_name: KFold
-
-optimizer: AdamW
-
-model_name: EEGNetWithSubjectBatchNorm
-dropout_rate: 0.5
-
-
-
+# 前処理
+force_preprocess: False
 current_rate: 281
 lowcut: 0.5
 highcut: 50
@@ -34,13 +31,41 @@ num_channels: 271  # チャンネル数
 num_timepoints: 128
 fs: 128
 
-device: cuda:0
-num_workers: 4
-seed: 3711
+# 交差検証
+splitter_name: StratifiedKFold
+use_cv: False
+n_splits: 5
 
-use_wandb: False
+optimizer: AdamW
 
-data_dir: data
+selected_model_index: 0
+model:
+  - name: "EEGNet"
+    params:
+      num_classes: 1854
+      Chans: 271
+      Samples: 128
+      dropout_rate: 0.5
+  - name: "EEGNetImproved"
+    params:
+      num_classes: 1854
+      Chans: 271
+      Samples: 128
+      dropout_rate: 0.5
+  - name: "EEGNetWithSubject"
+    params:
+      num_classes: 1854
+      Chans: 271
+      Samples: 128
+      dropout_rate: 0.5
+      num_subjects: 4
+  - name: "EEGNetWithSubjectBatchNorm"
+    params:
+      num_classes: 1854
+      Chans: 271
+      Samples: 128
+      dropout_rate: 0.5
+      num_subjects: 4
 
 
 # Evaluation

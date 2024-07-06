@@ -8,6 +8,7 @@ import torchvision.models as models
 class EEGNet(nn.Module):
     def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.25):
         super(EEGNet, self).__init__()
+        print(f"dropout_rate = {dropout_rate}")
         
         self.firstconv = nn.Sequential(
             nn.Conv2d(1, 16, (1, 51), stride=(1, 1), padding=(0, 25), bias=False),
@@ -34,7 +35,7 @@ class EEGNet(nn.Module):
             nn.Linear(32 * ((Samples // 32)), num_classes)
         )
 
-    def forward(self, x):
+    def forward(self, x, subject_idxs=None):
         # 入力xにunsqueeze(1)を適用して、新しい次元を挿入
         # x = x.unsqueeze(1)
         x = self.firstconv(x)
@@ -88,7 +89,7 @@ class EEGNetImproved(nn.Module):
             nn.Linear(512, num_classes)
         )
 
-    def forward(self, x):
+    def forward(self, x, subject_idxs=None):
         x = self.firstconv(x)
         x = self.depthwiseConv(x)
         x = self.separableConv1(x)
