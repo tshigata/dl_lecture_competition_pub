@@ -1,6 +1,6 @@
 wandb:
   project: "MEG-classification"
-  comment: "EEGNetでハイパラ比較"
+  comment: "EEGNetWithSubjectBatchNormAdd"
 
 dry_run: False
 use_wandb: True
@@ -10,7 +10,7 @@ seed: 3711
 num_classes: 1854
 num_subjects: 4
 num_epochs: 50
-num_batches: 16
+num_batches: 32
 learning_rate: 0.001
 num_patience: 7
 
@@ -37,8 +37,10 @@ use_cv: False
 n_splits: 5
 
 optimizer: AdamW
+scheduler: ReduceLROnPlateau
 
-selected_model_index: 0
+model_name: EEGNetWithSubjectBatchNormAdd
+selected_model_index: 3
 model:
   - name: "EEGNet"
     params:
@@ -66,6 +68,28 @@ model:
       Samples: 128
       dropout_rate: 0.5
       num_subjects: 4
+  - name: "EEGNetWithSubjectBatchNormAll"
+    params:
+      num_classes: 1854
+      Chans: 271
+      Samples: 128
+      dropout_rate: 0.5
+      num_subjects: 4
+  - name: "EEGNetWithSubjectBatchNormAll3"
+    params:
+      num_classes: 1854
+      Chans: 271
+      Samples: 128
+      dropout_rate: 0.5
+      num_subjects: 4
+
+  # - name: "EEGNetWithAttention"
+  #   params:
+  #     num_classes: 1854
+  #     Chans: 271
+  #     Samples: 128
+  #     dropout_rate: 0.5
+
 
 
 # Evaluation

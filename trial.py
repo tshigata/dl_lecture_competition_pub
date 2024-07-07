@@ -16,6 +16,7 @@ import pytz
 from sklearn.model_selection import KFold, StratifiedKFold
 from torch.utils.data import DataLoader, TensorDataset
 from timm.scheduler import CosineLRScheduler
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 from termcolor import cprint
 
@@ -25,19 +26,7 @@ from src.preprocess import preprocess_eeg_data
 from src.preprocess import AugmentedSubset
 from src.preprocess import AugmentedDataset
 
-from src.models import EEGNet
-from src.models import EEGNetImproved
-from src.models import EEGNetWithSubject
-from src.models import EEGNetWithSubjectBatchNorm
-from src.models import ShallowConvNet
-from src.models import DeepConvNet
-from src.models import ResNet18
-from src.models import LSTMModel
-from src.models import CNNLSTM
-from src.models import DenseNet
-from src.models import GRUModel
-from src.models import InceptionNet
-from src.models import EEGTransformerEncoder
+from src.models import *
 from src.utils import set_seed
 
 import hydra
@@ -57,31 +46,6 @@ def print_tensor_info(tensor, tensor_name):
     print(f"{tensor_name}のShape:", tensor.shape)
 
 def load_data(data_dir, force_preprocess):
-    train_X = torch.load(os.path.join(data_dir, 'train_X.pt'))
-    val_X = torch.load(os.path.join(data_dir, 'val_X.pt'))
-    train_y = torch.load(os.path.join(data_dir, 'train_y.pt'))
-    val_y = torch.load(os.path.join(data_dir, 'val_y.pt'))
-    train_subject_idxs = torch.load(os.path.join(data_dir, 'train_subject_idxs.pt'))
-    val_subject_idxs = torch.load(os.path.join(data_dir, 'val_subject_idxs.pt'))
-
-    # データの形状を確認
-    print_tensor_info(train_X, "train_X")
-    print_tensor_info(val_X, "val_X")
-    print_tensor_info(train_y, "train_y")
-    print_tensor_info(val_y, "val_y")
-    print_tensor_info(train_subject_idxs, "train_subject_idxs")
-    print_tensor_info(val_subject_idxs, "val_subject_idxs")
-
-    # データの結合  
-    X = torch.cat((train_X, val_X), dim=0)
-    y = torch.cat((train_y, val_y), dim=0)
-    subject_idxs_train = torch.cat((train_subject_idxs, val_subject_idxs), dim=0)
-
-    print("結合後：")
-    print_tensor_info(X, "X")
-    print_tensor_info(y, "y")
-    print_tensor_info(subject_idxs_train, "subject_idxs_train")
-
     # 前処理済みデータの保存パス
     preprocessed_data_path = os.path.join(data_dir, 'preprocessed_data.pt')
 
@@ -89,9 +53,32 @@ def load_data(data_dir, force_preprocess):
         # 前処理済みデータが存在する場合、ロードする
         X = torch.load(preprocessed_data_path)
     else:
+        # 前処理済みデータが存在しない場合、元データをロードして前処理を行う
+        train_X = torch.load(os.path.join(data_dir, 'train_X.pt'))
+        val_X = torch.load(os.path.join(data_dir, 'val_X.pt'))
+        print_tensor_info(train_X, "train_X")
+        print_tensor_info(val_X, "val_X")
+        X = torch.cat((train_X, val_X), dim=0)
         # 前処理を行い、保存する
         X = torch.tensor(preprocess_eeg_data(X.numpy()), dtype=torch.float32).unsqueeze(1)
         torch.save(X, preprocessed_data_path)
+
+
+    train_y = torch.load(os.path.join(data_dir, 'train_y.pt'))
+    val_y = torch.load(os.path.join(data_dir, 'val_y.pt'))
+    train_subject_idxs = torch.load(os.path.join(data_dir, 'train_subject_idxs.pt'))
+    val_subject_idxs = torch.load(os.path.join(data_dir, 'val_subject_idxs.pt'))
+
+    # データの形状を確認
+    print_tensor_info(train_y, "train_y")
+    print_tensor_info(val_y, "val_y")
+    print_tensor_info(train_subject_idxs, "train_subject_idxs")
+    print_tensor_info(val_subject_idxs, "val_subject_idxs")
+
+    # データの結合  
+    y = torch.cat((train_y, val_y), dim=0)
+    subject_idxs_train = torch.cat((train_subject_idxs, val_subject_idxs), dim=0)
+
 
     dataset = TensorDataset(X, y, subject_idxs_train)
 
@@ -217,10 +204,15 @@ def cross_validation_training(dataset, output_folder, cfg):
             optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=0.02)
         else:
             optimizer = torch.optim.SGD(model.parameters(), lr=cfg.learning_rate, momentum=0.9)
-        print(optimizer)
+        cprint(optimizer, "light_blue")
         
-        scheduler = CosineLRScheduler(optimizer, t_initial=100, lr_min=1e-6,
+        if cfg.scheduler == "ReduceLROnPlateau":
+            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=3)
+        else:
+            scheduler = CosineLRScheduler(optimizer, t_initial=100, lr_min=1e-6,
                                       warmup_t=3, warmup_lr_init=1e-6, warmup_prefix=True)
+        cprint(optimizer, "light_blue")
+        
         early_stopping = EarlyStopping(patience=cfg.num_patience, verbose=True)
 
         accuracy = Accuracy(task="multiclass", num_classes=cfg.num_classes, top_k=10).to(device)
