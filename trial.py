@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset, TensorDataset
-from sklearn.model_selection import KFold
 import torchvision.models as models
+from torch.cuda.amp import GradScaler, autocast
 import pandas as pd
 import numpy as np
 import torch.nn.functional as F
@@ -13,6 +13,7 @@ import time
 import datetime
 import pytz
 
+from sklearn.model_selection import KFold
 from sklearn.model_selection import KFold, StratifiedKFold
 from torch.utils.data import DataLoader, TensorDataset
 from timm.scheduler import CosineLRScheduler
@@ -97,7 +98,7 @@ def model_factory(models_config, selected_model_index):
 
 
 # 1エポック分の処理を関数化
-def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, optimizer, scheduler, accuracy, device, cfg):
+def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, scaler, optimizer, scheduler, accuracy, device, cfg):
     print(f"Epoch {epoch+1}/{cfg.num_epochs}")
 
     train_loss, train_acc, val_loss, val_acc = [], [], [], []
@@ -110,13 +111,16 @@ def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, optimiz
     for X, y, subject_idxs in tqdm(train_loader, desc=f'Epoch {epoch+1}/{cfg.num_epochs} Training'):
         X, y, subject_idxs = X.to(device), y.to(device), subject_idxs.to(device)
 
-        y_pred = model(X, subject_idxs)
-        loss = F.cross_entropy(y_pred, y)
+        optimizer.zero_grad()
+        with autocast():
+            y_pred = model(X, subject_idxs)
+            loss = F.cross_entropy(y_pred, y)
         train_loss.append(loss.item())
 
-        optimizer.zero_grad()
-        loss.backward()
+        scaler.scale(loss).backward()
+        # loss.backward()
         optimizer.step()
+        scaler.update()
 
         acc = accuracy(y_pred, y)
         train_acc.append(acc.item())
@@ -144,9 +148,10 @@ def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, optimiz
 
 def train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimizer, scheduler, early_stopping, device, output_folder, cfg):
     max_val_acc = 0
+    scaler = GradScaler(enabled=cfg.use_amp)
 
     for epoch in range(cfg.num_epochs):
-        train_loss, train_acc, val_loss, val_acc = train_and_validate_one_epoch(epoch, model, train_loader, val_loader, optimizer, scheduler, accuracy, device, cfg)
+        train_loss, train_acc, val_loss, val_acc = train_and_validate_one_epoch(epoch, model, train_loader, val_loader, scaler, optimizer, scheduler, accuracy, device, cfg)
         if cfg.use_wandb:
             wandb.log({
                 f'loss/train/fold-{fold}' if fold is not None else 'loss/train': train_loss,

@@ -4,6 +4,7 @@ wandb:
 
 dry_run: False
 use_wandb: True
+use_amp: True
 device: cuda:0
 num_workers: 4
 seed: 3711
