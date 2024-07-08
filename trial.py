@@ -102,6 +102,9 @@ def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, optimiz
 
     train_loss, train_acc, val_loss, val_acc = [], [], [], []
 
+    # スケジューラとoptimizerによって設定された学習率を表示
+    print(f"Learning rate: {optimizer.param_groups[0]['lr']}")
+
     # トレーニングフェーズ
     model.train()
     for X, y, subject_idxs in tqdm(train_loader, desc=f'Epoch {epoch+1}/{cfg.num_epochs} Training'):
@@ -129,7 +132,11 @@ def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, optimiz
         val_loss.append(F.cross_entropy(y_pred, y).item())
         val_acc.append(accuracy(y_pred, y).item())
     
-    scheduler.step(np.mean(val_loss))  # 学習率を調整
+    if cfg.scheduler == "ReduceLROnPlateau":
+        scheduler.step(np.mean(val_acc))
+    else:
+        scheduler.step(epoch)  # 学習率を調整
+
     # エポックの結果を表示
     print(f"Epoch {epoch+1}/{cfg.num_epochs} | train loss: {np.mean(train_loss):.3f} | train acc: {np.mean(train_acc):.3f} | val loss: {np.mean(val_loss):.3f} | val acc: {np.mean(val_acc):.3f}")
 
@@ -196,22 +203,22 @@ def cross_validation_training(dataset, output_folder, cfg):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         model = model_factory(cfg.model, cfg.selected_model_index).to(device)
         print(model)
+        cprint(model.__class__.__name__, "light_blue")
 
         # 損失関数と最適化関数
         if cfg.optimizer == "Adam":
             optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
         elif cfg.optimizer == "AdamW":
-            optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=0.02)
+            optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.02)
         else:
             optimizer = torch.optim.SGD(model.parameters(), lr=cfg.learning_rate, momentum=0.9)
         cprint(optimizer, "light_blue")
         
         if cfg.scheduler == "ReduceLROnPlateau":
-            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=3)
+            scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=10, min_lr=0.0001, verbose=True)
         else:
-            scheduler = CosineLRScheduler(optimizer, t_initial=100, lr_min=1e-6,
-                                      warmup_t=3, warmup_lr_init=1e-6, warmup_prefix=True)
-        cprint(optimizer, "light_blue")
+            scheduler = CosineLRScheduler(optimizer, t_initial=50, lr_min=1e-4, warmup_t=3, warmup_lr_init=0.001, warmup_prefix=True)
+        cprint(scheduler, "light_blue")
         
         early_stopping = EarlyStopping(patience=cfg.num_patience, verbose=True)
 
@@ -278,6 +285,9 @@ def run(cfg: DictConfig):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         model = model_factory(cfg.model, cfg.selected_model_index).to(device)
         print(model)
+        # モデルクラスの名前を表示
+        cprint(model.__class__.__name__, "light_blue")
+
 
         # 保存されたモデルのファイル名のリスト
         model_files = [f'model_best_fold{fold+1}.pt' for fold in range(cfg.n_splits)]  # 5-Foldの例

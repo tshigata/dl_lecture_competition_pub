@@ -9,10 +9,12 @@ num_workers: 4
 seed: 3711
 num_classes: 1854
 num_subjects: 4
-num_epochs: 50
-num_batches: 32
+num_epochs: 100
+num_batches: 128
+# num_batches: 32
+# learning_rate: 0.001
 learning_rate: 0.001
-num_patience: 7
+num_patience: 10
 
 
 # データセット
@@ -33,14 +35,14 @@ fs: 128
 
 # 交差検証
 splitter_name: KFold
-use_cv: False
-n_splits: 5
+use_cv: True
+n_splits: 10
 
 optimizer: AdamW
-scheduler: ReduceLROnPlateau
+scheduler: CosineLRScheduler
 
-model_name: EEGNetWithSubjectBatchNormAdd
-selected_model_index: 3
+model_name: 
+selected_model_index: 5
 model:
   - name: "EEGNet"
     params:

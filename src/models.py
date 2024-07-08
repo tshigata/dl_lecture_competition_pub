@@ -397,7 +397,7 @@ class EEGNetWithSubjectBatchNormAll(nn.Module):
 
 class EEGNetWithSubjectBatchNormAll3(nn.Module):
     def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5, num_subjects=4):
-        super(EEGNetWithSubjectBatchNormAll, self).__init__()
+        super(EEGNetWithSubjectBatchNormAll3, self).__init__()
         
         self.subject_embedding = nn.Embedding(num_subjects, 16)
 
