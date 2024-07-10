@@ -7,16 +7,18 @@ use_wandb: True
 # use_pin_memory: True
 # use_non_blocking: True
 use_amp: False
+use_multi_seeds: False
 device: cuda:0
 num_workers: 4
 seed: 3711
 num_classes: 1854
 num_subjects: 4
-num_epochs: 20
-# num_epochs: 100
+# num_epochs: 20
+num_epochs: 100
 # num_batches: 32
-num_batches: 128
-learning_rate: 0.0001
+# num_batches: 128
+num_batches: 256
+learning_rate: 0.001
 num_patience: 10
 
 
@@ -35,6 +37,7 @@ target_rate: 32
 num_channels: 271  # チャンネル数
 num_timepoints: 128
 fs: 128
+use_baseline_correction: True
 
 # 交差検証
 splitter_name: KFold
@@ -45,7 +48,7 @@ optimizer: AdamW
 scheduler: CosineLRScheduler
 
 model_name: 
-selected_model_index: 5
+selected_model_index: 6
 model:
   - name: "EEGNet"
     params:
@@ -87,12 +90,12 @@ model:
       Samples: 128
       dropout_rate: 0.5
       num_subjects: 4
-  - name: "EEGNetWithSubject"
+  - name: "ImprovedEEGNet"
     params:
       num_classes: 1854
       Chans: 271
       Samples: 128
-      dropout_rate: 0.5
+      dropout_rate: 0.2
       num_subjects: 4
 
   # - name: "EEGNetWithAttention"

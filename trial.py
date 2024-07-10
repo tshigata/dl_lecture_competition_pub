@@ -47,10 +47,12 @@ def create_dummy_data():
 def print_tensor_info(tensor, tensor_name):
     print(f"{tensor_name}のShape:", tensor.shape)
 
-def load_data(data_dir, force_preprocess):
+def load_data(data_dir, force_preprocess, use_baseline_correction=False):
     # 前処理済みデータの保存パス
-    preprocessed_data_path = os.path.join(data_dir, 'preprocessed_data.pt')
-    # preprocessed_data_path = os.path.join(data_dir, 'preprocessed_data_b.pt')
+    if not use_baseline_correction:
+        preprocessed_data_path = os.path.join(data_dir, 'preprocessed_data.pt')
+    else:
+        preprocessed_data_path = os.path.join(data_dir, 'preprocessed_data_b.pt')
 
     if (not force_preprocess) and os.path.exists(preprocessed_data_path):
         # 前処理済みデータが存在する場合、ロードする
@@ -63,7 +65,7 @@ def load_data(data_dir, force_preprocess):
         print_tensor_info(val_X, "val_X")
         X = torch.cat((train_X, val_X), dim=0)
         # 前処理を行い、保存する
-        X = torch.tensor(preprocess_eeg_data(X.numpy()), dtype=torch.float32).unsqueeze(1)
+        X = torch.tensor(preprocess_eeg_data(X.numpy(), use_baseline_correction), dtype=torch.float32).unsqueeze(1)
         torch.save(X, preprocessed_data_path)
 
 
@@ -124,6 +126,7 @@ def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, scaler,
             y_pred = model(X, subject_idxs)
             loss = F.cross_entropy(y_pred, y)
 
+        train_loss.append(loss.item())
         # loss.backward()
         scaler.scale(loss).backward()
         # optimizer.step()
@@ -183,7 +186,7 @@ def train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimize
             cprint(f"New best for Fold {fold+1}/{cfg.n_splits}. Max Val Acc = {max_val_acc:.5f}", "cyan")
 
         if cfg.use_wandb:
-            wandb.log({f'max_val_acc/validation/fold-{fold}' if fold is not None else 'max_val_acc/validation': max_val_acc, 'epoch': epoch})
+            wandb.log({f'max_val_acc/fold-{fold}' if fold is not None else 'max_val_acc': max_val_acc, 'epoch': epoch, 'folds': fold if fold is not None else 'None'})
 
         early_stopping(val_acc, model)
         if early_stopping.early_stop:
@@ -199,6 +202,10 @@ def set_random_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+def weights_init(m):
+    if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
+        nn.init.kaiming_normal_(m.weight)
 
 def cross_validation_training(dataset, output_folder, cfg):
     max_val_acc_list = []
@@ -231,6 +238,7 @@ def cross_validation_training(dataset, output_folder, cfg):
         # モデルの定義
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         model = model_factory(cfg.model, cfg.selected_model_index).to(device)
+        model.apply(weights_init)
         print(model)
         cprint(model.__class__.__name__, "light_blue")
 
@@ -239,15 +247,15 @@ def cross_validation_training(dataset, output_folder, cfg):
             if cfg.optimizer == "Adam":
                 optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
             elif cfg.optimizer == "AdamW":
-                optimizer = torch.optim.AdamW(model.parameters(), lr=0.01, weight_decay=0.02)
+                optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.02)
             else:
                 optimizer = torch.optim.SGD(model.parameters(), lr=cfg.learning_rate, momentum=0.9)
             cprint(optimizer, "light_blue")
             
             if cfg.scheduler == "ReduceLROnPlateau":
-                scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=10, min_lr=0.0001, verbose=True)
+                scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.8, patience=3, min_lr=0.0001, verbose=True)
             else:
-                scheduler = CosineLRScheduler(optimizer, t_initial=120, lr_min=1e-5, warmup_t=3, warmup_lr_init=0.0001, warmup_prefix=True)
+                scheduler = CosineLRScheduler(optimizer, t_initial=120, lr_min=0.001, warmup_t=3, warmup_lr_init=0.001, warmup_prefix=True)
             cprint(scheduler, "light_blue")
             
             early_stopping = EarlyStopping(patience=cfg.num_patience, verbose=True)
@@ -262,6 +270,9 @@ def cross_validation_training(dataset, output_folder, cfg):
 
             cprint(f"Fold {fold+1} max Acc = {max_val_acc}", "cyan")
             cprint("------------------------", "cyan")
+
+            if not cfg.use_multi_seeds:
+                break
 
         if not cfg.use_cv:
             break
@@ -285,7 +296,7 @@ def run(cfg: DictConfig):
         dataset = create_dummy_data()
     else:
         data_dir = cfg.data_dir
-        dataset = load_data(data_dir, cfg.force_preprocess)
+        dataset = load_data(data_dir, cfg.force_preprocess, cfg.use_baseline_correction)
         
     max_val_acc = 0
     max_val_acc_list = []
