@@ -25,19 +25,7 @@ from src.preprocess import preprocess_eeg_data
 from src.preprocess import AugmentedSubset
 from src.preprocess import AugmentedDataset
 
-from src.models import EEGNet
-from src.models import EEGNetImproved
-from src.models import EEGNetWithSubject
-from src.models import EEGNetWithSubjectBatchNorm
-from src.models import ShallowConvNet
-from src.models import DeepConvNet
-from src.models import ResNet18
-from src.models import LSTMModel
-from src.models import CNNLSTM
-from src.models import DenseNet
-from src.models import GRUModel
-from src.models import InceptionNet
-from src.models import EEGTransformerEncoder
+from src.models import *
 from src.utils import set_seed
 
 import hydra
@@ -227,6 +215,11 @@ def cross_validation_training(kf, dataset, ModelClass, accuracy, device, args, s
 
     return max_val_acc_list
 
+def model_factory(models_config, selected_model_index):
+    selected_model_config = models_config[selected_model_index]
+    model_class = globals()[selected_model_config['name']]
+    return model_class(**selected_model_config['params'])
+
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def run(cfg: DictConfig):
     start_time = time.time()
@@ -235,10 +228,10 @@ def run(cfg: DictConfig):
     print(f"Log directory  : {logdir}")
     save_folder_name = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
     
-    if cfg.use_wandb:
-        # DictConfigを通常の辞書に変換
-        config_dict = OmegaConf.to_container(cfg, resolve=True)
-        wandb.init(mode="online", dir=logdir, project="MEG-classification", config=config_dict)
+    # if cfg.use_wandb:
+    #     # DictConfigを通常の辞書に変換
+    #     config_dict = OmegaConf.to_container(cfg, resolve=True)
+    #     wandb.init(mode="online", dir=logdir, project="MEG-classification", config=config_dict)
          
     # デバイスの設定
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -254,15 +247,15 @@ def run(cfg: DictConfig):
     # ).to(device)
 
 
-    max_val_acc = 0
-    max_val_acc_list = []
+    # max_val_acc = 0
+    # max_val_acc_list = []
 
-    if cfg.model_name not in model_classes:
-        raise ValueError(f"モデル名 {cfg.model_name} は無効です。利用可能なモデル名: {list(model_classes.keys())}")
+    # if cfg.model_name not in model_classes:
+    #     raise ValueError(f"モデル名 {cfg.model_name} は無効です。利用可能なモデル名: {list(model_classes.keys())}")
     
-    ModelClass = model_classes[cfg.model_name]
-    print("------------------------")
-    print(f'Training {cfg.model_name}')
+    # ModelClass = model_classes[cfg.model_name]
+    # print("------------------------")
+    # print(f'Training {cfg.model_name}')
 
     # # 交差検証なし
     # if not cfg.use_cv:
@@ -319,11 +312,12 @@ def run(cfg: DictConfig):
     #     wandb.log({'total_val_acc_mean': mean_acc})
     # cprint(f"Total Val Acc mean = {mean_acc} !", "cyan")
 
-    save_folder_name = "outputs/2024-07-06/02-11-26"
+
+
+# D:\Dev\DLBasic\Compe\dl_lecture_competition_pub\outputs\2024-07-09\11-54-00
+    save_folder_name = "outputs/2024-07-09/11-54-00"
     if (not cfg.dry_run) and cfg.use_cv:
         # モデルの定義
-
-        model = ModelClass(num_classes=cfg.num_classes).to(device)
 
 
         # テストデータを読み込む
@@ -341,7 +335,12 @@ def run(cfg: DictConfig):
         predictions = []
 
         # モデルの定義
-        model = ModelClass(num_classes=cfg.num_classes).to(device)
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model = model_factory(cfg.model, cfg.selected_model_index).to(device)
+        print(model)
+        # モデルクラスの名前を表示
+        cprint(model.__class__.__name__, "light_blue")
+
 
         # 保存されたモデルのファイル名のリスト
         model_files = [f'model_best_fold{fold+1}.pt' for fold in range(cfg.n_splits)]  # 5-Foldの例

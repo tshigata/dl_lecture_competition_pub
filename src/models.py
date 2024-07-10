@@ -454,7 +454,7 @@ class EEGNetWithSubjectBatchNormAll3(nn.Module):
         subject_embeds = self.subject_embedding(subject_idxs)
 
         x = self.firstconv[0](x)
-        x = self.firstconv[1](x, subject_idxs)
+        x = self.firstconv[1](x, subject_idxs) # batchnormに被験者IDを渡す
         x = self.firstconv[2](x)
         x = self.firstconv[3](x)
         
@@ -486,7 +486,343 @@ class EEGNetWithSubjectBatchNormAll3(nn.Module):
         x = torch.cat((x, subject_embeds), dim=1)
         x = self.classify(x)
         return x
-    
+
+
+class SubjectBatchNorm(nn.BatchNorm2d):
+    def __init__(self, num_features, num_subjects):
+        super(SubjectBatchNorm, self).__init__(num_features)
+        self.subject_bn = nn.ModuleList([nn.BatchNorm2d(num_features) for _ in range(num_subjects)])
+
+    def forward(self, x, subject_idx):
+        out = torch.stack([self.subject_bn[i](x) for i in range(len(self.subject_bn))], dim=0)
+        out = torch.index_select(out, 0, subject_idx)
+        return out
+
+class EEGNetWithSubjectBatchNormAllwithR(nn.Module):
+    def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5, num_subjects=4):
+        super(EEGNetWithSubjectBatchNormAllwithR, self).__init__()
+        
+        self.subject_embedding = nn.Embedding(num_subjects, 16)
+
+        self.firstconv = nn.Sequential(
+            nn.Conv2d(1, 32, (1, 51), stride=(1, 1), padding=(0, 25), bias=False),
+            SubjectBatchNorm(32, num_subjects),
+            nn.ELU(),
+            nn.MaxPool2d((1, 2))
+        )
+
+        self.depthwiseConv = nn.Sequential(
+            nn.Conv2d(32, 64, (Chans, 1), stride=(1, 1), groups=32, bias=False),
+            SubjectBatchNorm(64, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv1 = nn.Sequential(
+            nn.Conv2d(64, 128, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            SubjectBatchNorm(128, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv2 = nn.Sequential(
+            nn.Conv2d(128, 256, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            SubjectBatchNorm(256, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv3 = nn.Sequential(
+            nn.Conv2d(256, 512, (1, 7), stride=(1, 1), padding=(0, 3), bias=False),
+            SubjectBatchNorm(512, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.flattened_size = 256 * ((Samples // 2 // 2 // 2 // 2))
+        self.classify = nn.Sequential(
+            nn.Linear(self.flattened_size + 16, 1024),  # 隠れ層の次元を増加
+            nn.ELU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(1024, 512),
+            nn.ELU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(512, num_classes)
+        )
+
+    def forward(self, x, subject_idxs):
+        subject_embeds = self.subject_embedding(subject_idxs)
+
+        residual = x
+        x = self.firstconv[0](x)
+        x = self.firstconv[1](x, subject_idxs)  # batchnormに被験者IDを渡す
+        x = self.firstconv[2](x)
+        x = self.firstconv[3](x)
+        x += F.interpolate(residual, size=x.size()[2:])  # Add residual connection with interpolation
+
+        residual = x
+        x = self.depthwiseConv[0](x)
+        x = self.depthwiseConv[1](x, subject_idxs)
+        x = self.depthwiseConv[2](x)
+        x = self.depthwiseConv[3](x)
+        x = self.depthwiseConv[4](x)
+        x += F.interpolate(residual, size=x.size()[2:])  # Add residual connection with interpolation
+
+        residual = x
+        x = self.separableConv1[0](x)
+        x = self.separableConv1[1](x, subject_idxs)
+        x = self.separableConv1[2](x)
+        x = self.separableConv1[3](x)
+        x = self.separableConv1[4](x)
+        x += F.interpolate(residual, size=x.size()[2:])  # Add residual connection with interpolation
+
+        residual = x
+        x = self.separableConv2[0](x)
+        x = self.separableConv2[1](x, subject_idxs)
+        x = self.separableConv2[2](x)
+        x = self.separableConv2[3](x)
+        x = self.separableConv2[4](x)
+        x += F.interpolate(residual, size=x.size()[2:])  # Add residual connection with interpolation
+
+        residual = x
+        x = self.separableConv3[0](x)
+        x = self.separableConv3[1](x, subject_idxs)
+        x = self.separableConv3[2](x)
+        x = self.separableConv3[3](x)
+        x = self.separableConv3[4](x)
+        x += F.interpolate(residual, size=x.size()[2:])  # Add residual connection with interpolation
+
+        x = x.view(x.size(0), -1)
+        x = torch.cat((x, subject_embeds), dim=1)
+        x = self.classify(x)
+        return x
+
+
+class SubjectBatchNorm(nn.Module):
+    def __init__(self, num_features, num_subjects):
+        super(SubjectBatchNorm, self).__init__()
+        self.num_subjects = num_subjects
+        self.bns = nn.ModuleList([nn.BatchNorm2d(num_features) for _ in range(num_subjects)])
+
+    def forward(self, x, subject_idx):
+        out = torch.zeros_like(x)
+        for i in range(self.num_subjects):
+            mask = (subject_idx == i).unsqueeze(1).unsqueeze(2).unsqueeze(3).float()
+            out += self.bns[i](x) * mask
+        return out
+
+
+
+
+
+
+
+# 畳み込み層にも被験者IDを渡す
+class EEGNetWithSubject(nn.Module):
+    def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5, num_subjects=4):
+        super(EEGNetWithSubject, self).__init__()
+        
+        self.subject_embedding = nn.Embedding(num_subjects, 1)
+
+        self.firstconv = nn.Sequential(
+            nn.Conv2d(1, 32, (1, 51), stride=(1, 1), padding=(0, 25), bias=False),
+            SubjectBatchNorm(32, num_subjects),
+            nn.ELU(),
+            nn.MaxPool2d((1, 2))
+        )
+
+        self.depthwiseConv = nn.Sequential(
+            nn.Conv2d(32, 64, (Chans, 1), stride=(1, 1), groups=32, bias=False),
+            SubjectBatchNorm(64, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv1 = nn.Sequential(
+            nn.Conv2d(64, 128, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            SubjectBatchNorm(128, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv2 = nn.Sequential(
+            nn.Conv2d(128, 256, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            SubjectBatchNorm(256, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.additional_conv = nn.Sequential(
+            nn.Conv2d(256, 512, (1, 10), stride=(1, 1), padding=(0, 5), bias=False),  # 追加の畳み込み層
+            SubjectBatchNorm(512, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.flattened_size = 512 * ((Samples // 2 // 2 // 2 // 2 // 2))
+        self.classify = nn.Sequential(
+            nn.Linear(self.flattened_size + 16, 512),
+            nn.ELU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(512, num_classes)
+        )
+
+    def forward(self, x, subject_idxs):
+        subject_embeds = self.subject_embedding(subject_idxs).unsqueeze(2).unsqueeze(3)  # チャンネル次元を追加
+        subject_embeds = subject_embeds.expand(-1, -1, x.size(2), x.size(3))  # サイズをxに合わせて拡張
+
+        x = torch.cat((x, subject_embeds), dim=1)  # チャンネル方向に結合
+
+        x = self.firstconv(x)
+        x = self.depthwiseConv(x)
+        x = self.separableConv1(x)
+        x = self.separableConv2(x)
+        x = self.additional_conv(x)
+
+        x = x.view(x.size(0), -1)
+        subject_embeds_flat = self.subject_embedding(subject_idxs)
+        x = torch.cat((x, subject_embeds_flat), dim=1)
+        x = self.classify(x)
+        return x
+
+
+
+#--------------------------------------------------------------------------------
+
+class Attention(nn.Module):
+    def __init__(self, input_dim):
+        super(Attention, self).__init__()
+        self.attn = nn.Sequential(
+            nn.Conv2d(input_dim, input_dim, kernel_size=1),
+            nn.Softmax(dim=-1)
+        )
+
+    def forward(self, x):
+        attn_weights = self.attn(x)
+        return x * attn_weights
+
+class SubjectBatchNorm2(nn.Module):
+    def __init__(self, num_features, num_subjects):
+        super(SubjectBatchNorm2, self).__init__()
+        self.subject_bn = nn.ModuleList([nn.BatchNorm2d(num_features) for _ in range(num_subjects)])
+
+    def forward(self, x, subject_idx):
+        out = torch.stack([self.subject_bn[i](x) for i in range(len(self.subject_bn))], dim=0)
+        out = out[subject_idx, range(x.size(0)), :, :, :]
+        return out
+
+class EEGNetWithSubjectBatchNormAttention(nn.Module):
+    def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5, num_subjects=4):
+        super(EEGNetWithSubjectBatchNormAttention, self).__init__()
+        
+        self.subject_embedding = nn.Embedding(num_subjects, 16)
+
+        self.firstconv = nn.Sequential(
+            nn.Conv2d(1, 32, (1, 51), stride=(1, 1), padding=(0, 25), bias=False),
+            SubjectBatchNorm2(32, num_subjects),
+            nn.ELU(),
+            Attention(32),  # Add attention layer
+            nn.MaxPool2d((1, 2))
+        )
+
+        self.depthwiseConv = nn.Sequential(
+            nn.Conv2d(32, 64, (Chans, 1), stride=(1, 1), groups=32, bias=False),
+            SubjectBatchNorm2(64, num_subjects),
+            nn.ELU(),
+            Attention(64),  # Add attention layer
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv1 = nn.Sequential(
+            nn.Conv2d(64, 128, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            SubjectBatchNorm2(128, num_subjects),
+            nn.ELU(),
+            Attention(128),  # Add attention layer
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv2 = nn.Sequential(
+            nn.Conv2d(128, 256, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            SubjectBatchNorm2(256, num_subjects),
+            nn.ELU(),
+            Attention(256),  # Add attention layer
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv3 = nn.Sequential(
+            nn.Conv2d(256, 512, (1, 7), stride=(1, 1), padding=(0, 3), bias=False),
+            SubjectBatchNorm2(512, num_subjects),
+            nn.ELU(),
+            Attention(512),  # Add attention layer
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.flattened_size = 512 * ((Samples // 2 // 2 // 2 // 2))
+        self.classify = nn.Sequential(
+            nn.Linear(self.flattened_size + 16, 1024),  # Increase hidden layer dimension
+            nn.ELU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(1024, 512),
+            nn.ELU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(512, num_classes)
+        )
+
+    def forward(self, x, subject_idxs):
+        subject_embeds = self.subject_embedding(subject_idxs)
+
+        x = self.firstconv[0](x)
+        x = self.firstconv[1](x, subject_idxs) # batchnormに被験者IDを渡す
+        x = self.firstconv[2](x)
+        x = self.firstconv[3](x)  # attention
+        x = self.firstconv[4](x)
+        
+        x = self.depthwiseConv[0](x)
+        x = self.depthwiseConv[1](x, subject_idxs)
+        x = self.depthwiseConv[2](x)
+        x = self.depthwiseConv[3](x)  # attention
+        x = self.depthwiseConv[4](x)
+        x = self.depthwiseConv[5](x)
+        
+        x = self.separableConv1[0](x)
+        x = self.separableConv1[1](x, subject_idxs)
+        x = self.separableConv1[2](x)
+        x = self.separableConv1[3](x)  # attention
+        x = self.separableConv1[4](x)
+        x = self.separableConv1[5](x)
+        
+        x = self.separableConv2[0](x)
+        x = self.separableConv2[1](x, subject_idxs)
+        x = self.separableConv2[2](x)
+        x = self.separableConv2[3](x)  # attention
+        x = self.separableConv2[4](x)
+        x = self.separableConv2[5](x)
+
+        x = self.separableConv3[0](x)
+        x = self.separableConv3[1](x, subject_idxs)
+        x = self.separableConv3[2](x)
+        x = self.separableConv3[3](x)  # attention
+        x = self.separableConv3[4](x)
+        x = self.separableConv3[5](x)
+        
+        x = x.view(x.size(0), -1)
+        x = torch.cat((x, subject_embeds), dim=1)
+        x = self.classify(x)
+        return x
+
+
 class SelfAttention(nn.Module):
     def __init__(self, embed_size):
         super(SelfAttention, self).__init__()

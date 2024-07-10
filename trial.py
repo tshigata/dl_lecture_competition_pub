@@ -12,6 +12,7 @@ import os
 import time
 import datetime
 import pytz
+import random
 
 from sklearn.model_selection import KFold
 from sklearn.model_selection import KFold, StratifiedKFold
@@ -49,6 +50,7 @@ def print_tensor_info(tensor, tensor_name):
 def load_data(data_dir, force_preprocess):
     # 前処理済みデータの保存パス
     preprocessed_data_path = os.path.join(data_dir, 'preprocessed_data.pt')
+    # preprocessed_data_path = os.path.join(data_dir, 'preprocessed_data_b.pt')
 
     if (not force_preprocess) and os.path.exists(preprocessed_data_path):
         # 前処理済みデータが存在する場合、ロードする
@@ -109,17 +111,23 @@ def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, scaler,
     # トレーニングフェーズ
     model.train()
     for X, y, subject_idxs in tqdm(train_loader, desc=f'Epoch {epoch+1}/{cfg.num_epochs} Training'):
-        X, y, subject_idxs = X.to(device), y.to(device), subject_idxs.to(device)
+        X, y, subject_idxs = X.to(device,non_blocking=True), y.to(device,non_blocking=True), subject_idxs.to(device,non_blocking=True)
 
         optimizer.zero_grad()
-        with autocast():
+
+        # AMPの使用
+        if cfg.use_amp:
+            with torch.cuda.amp.autocast():
+                y_pred = model(X, subject_idxs)
+                loss = F.cross_entropy(y_pred, y)
+        else:
             y_pred = model(X, subject_idxs)
             loss = F.cross_entropy(y_pred, y)
-        train_loss.append(loss.item())
 
-        scaler.scale(loss).backward()
         # loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        # optimizer.step()
+        scaler.step(optimizer)
         scaler.update()
 
         acc = accuracy(y_pred, y)
@@ -128,7 +136,7 @@ def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, scaler,
     # 検証フェーズ
     model.eval()
     for X, y, subject_idxs in tqdm(val_loader, desc="Validation"):
-        X, y, subject_idxs = X.to(device), y.to(device), subject_idxs.to(device)
+        X, y, subject_idxs = X.to(device,non_blocking=True), y.to(device,non_blocking=True), subject_idxs.to(device,non_blocking=True)
 
         with torch.no_grad():
             y_pred = model(X, subject_idxs)
@@ -154,11 +162,16 @@ def train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimize
         train_loss, train_acc, val_loss, val_acc = train_and_validate_one_epoch(epoch, model, train_loader, val_loader, scaler, optimizer, scheduler, accuracy, device, cfg)
         if cfg.use_wandb:
             wandb.log({
-                f'loss/train/fold-{fold}' if fold is not None else 'loss/train': train_loss,
-                f'acc/train/fold-{fold}' if fold is not None else 'acc/train': train_acc,
-                f'loss/validation/fold-{fold}' if fold is not None else 'loss/validation': val_loss,
-                f'acc/validation/fold-{fold}' if fold is not None else 'acc/validation': val_acc,
-                'epoch': epoch
+                # f'loss/train/fold-{fold}' if fold is not None else 'loss/train': train_loss,
+                # f'acc/train/fold-{fold}' if fold is not None else 'acc/train': train_acc,
+                # f'loss/validation/fold-{fold}' if fold is not None else 'loss/validation': val_loss,
+                # f'acc/validation/fold-{fold}' if fold is not None else 'acc/validation': val_acc,
+                f'train_loss/fold-{fold}' if fold is not None else 'train_loss/train': train_loss,
+                f'train_acc/fold-{fold}' if fold is not None else 'train_acc': train_acc,
+                f'val_loss/fold-{fold}' if fold is not None else 'val_loss': val_loss,
+                f'val_acc/fold-{fold}' if fold is not None else 'val_acc': val_acc,
+                'epoch': epoch,
+                'folds': fold if fold is not None else 'None',
             })
         if epoch == 0:
             torch.save(model.state_dict(), os.path.join(output_folder, f"model_best_fold{fold+1}.pt" if fold is not None else "model_best.pt"))
@@ -167,10 +180,10 @@ def train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimize
         if val_acc > max_val_acc:
             max_val_acc = val_acc
             torch.save(model.state_dict(), os.path.join(output_folder, f"model_best_fold{fold+1}.pt" if fold is not None else "model_best.pt"))
-            cprint(f"New best. Max Val Acc = {max_val_acc:.5f}", "cyan")
+            cprint(f"New best for Fold {fold+1}/{cfg.n_splits}. Max Val Acc = {max_val_acc:.5f}", "cyan")
 
         if cfg.use_wandb:
-            wandb.log({f'max_val_acc/validation/fold-{fold}' if fold is not None else 'max_val_acc/validation': max_val_acc})
+            wandb.log({f'max_val_acc/validation/fold-{fold}' if fold is not None else 'max_val_acc/validation': max_val_acc, 'epoch': epoch})
 
         early_stopping(val_acc, model)
         if early_stopping.early_stop:
@@ -179,8 +192,17 @@ def train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimize
 
     return max_val_acc
 
+def set_random_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # GPUを使用する場合
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 def cross_validation_training(dataset, output_folder, cfg):
     max_val_acc_list = []
+    fixed_seeds = [3711, 64, 128]  # 固定の3要素のリスト
 
     if cfg.splitter_name == 'StratifiedKFold':
         kf = StratifiedKFold(n_splits=cfg.n_splits, shuffle=True)
@@ -189,8 +211,8 @@ def cross_validation_training(dataset, output_folder, cfg):
 
     for fold, (train_index, val_index) in enumerate(kf.split(dataset, dataset.tensors[1])):
         cprint(f'Fold {fold+1}/{cfg.n_splits}', "yellow")
-    
-        
+
+      
         # トレーニングデータと検証データに分割
         if cfg.data_augmentation_train:
             train_data = AugmentedSubset(dataset, train_index, augmentation_prob=0.3)
@@ -201,45 +223,51 @@ def cross_validation_training(dataset, output_folder, cfg):
         val_data = Subset(dataset, val_index)
         
         cprint(f"Train data: {len(train_data)} | Val data: {len(val_data)} | Batch size: {cfg.num_batches}", "light_blue")
+        # train_loader = DataLoader(train_data, batch_size=cfg.num_batches, shuffle=True, num_workers=2, pin_memory=True)
+        # val_loader = DataLoader(val_data, batch_size=cfg.num_batches, shuffle=False, num_workers=2, pin_memory=True)
         train_loader = DataLoader(train_data, batch_size=cfg.num_batches, shuffle=True)
         val_loader = DataLoader(val_data, batch_size=cfg.num_batches, shuffle=False)
-
+        
         # モデルの定義
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         model = model_factory(cfg.model, cfg.selected_model_index).to(device)
         print(model)
         cprint(model.__class__.__name__, "light_blue")
 
-        # 損失関数と最適化関数
-        if cfg.optimizer == "Adam":
-            optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
-        elif cfg.optimizer == "AdamW":
-            optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.02)
-        else:
-            optimizer = torch.optim.SGD(model.parameters(), lr=cfg.learning_rate, momentum=0.9)
-        cprint(optimizer, "light_blue")
+        for seed in fixed_seeds:  # 固定のシードリストからシードを取得
+            # 損失関数と最適化関数
+            if cfg.optimizer == "Adam":
+                optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
+            elif cfg.optimizer == "AdamW":
+                optimizer = torch.optim.AdamW(model.parameters(), lr=0.01, weight_decay=0.02)
+            else:
+                optimizer = torch.optim.SGD(model.parameters(), lr=cfg.learning_rate, momentum=0.9)
+            cprint(optimizer, "light_blue")
+            
+            if cfg.scheduler == "ReduceLROnPlateau":
+                scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=10, min_lr=0.0001, verbose=True)
+            else:
+                scheduler = CosineLRScheduler(optimizer, t_initial=120, lr_min=1e-5, warmup_t=3, warmup_lr_init=0.0001, warmup_prefix=True)
+            cprint(scheduler, "light_blue")
+            
+            early_stopping = EarlyStopping(patience=cfg.num_patience, verbose=True)
+
+            accuracy = Accuracy(task="multiclass", num_classes=cfg.num_classes, top_k=10).to(device)
         
-        if cfg.scheduler == "ReduceLROnPlateau":
-            scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=10, min_lr=0.0001, verbose=True)
-        else:
-            scheduler = CosineLRScheduler(optimizer, t_initial=50, lr_min=1e-4, warmup_t=3, warmup_lr_init=0.001, warmup_prefix=True)
-        cprint(scheduler, "light_blue")
-        
-        early_stopping = EarlyStopping(patience=cfg.num_patience, verbose=True)
+            cprint(f'Fold {fold+1}/{cfg.n_splits}, Session with Seed {seed}', "yellow")
+            # ランダムシードの設定
+            set_random_seed(seed)
+            max_val_acc = train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimizer, scheduler, early_stopping, device, output_folder, cfg)
+            max_val_acc_list.append(max_val_acc)
 
-        accuracy = Accuracy(task="multiclass", num_classes=cfg.num_classes, top_k=10).to(device)
-
-        max_val_acc = train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimizer, scheduler, early_stopping, device, output_folder, cfg)
-        max_val_acc_list.append(max_val_acc)
-
-        cprint(f"Fold {fold+1} max Acc = {max_val_acc}", "cyan")
-        cprint("------------------------", "cyan")
+            cprint(f"Fold {fold+1} max Acc = {max_val_acc}", "cyan")
+            cprint("------------------------", "cyan")
 
         if not cfg.use_cv:
             break
 
     return max_val_acc_list
-
+import glob
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def run(cfg: DictConfig):
     start_time = time.time()
@@ -270,7 +298,7 @@ def run(cfg: DictConfig):
         wandb.log({'total_val_acc_mean': mean_acc})
     cprint(f"Total Val Acc mean = {mean_acc} !", "cyan")
 
-    if (not cfg.dry_run) and cfg.use_cv:
+    if not cfg.dry_run:
         # モデルの定義
 
         # テストデータを読み込む
@@ -295,7 +323,8 @@ def run(cfg: DictConfig):
 
 
         # 保存されたモデルのファイル名のリスト
-        model_files = [f'model_best_fold{fold+1}.pt' for fold in range(cfg.n_splits)]  # 5-Foldの例
+        # model_files = [f'model_best_fold{fold+1}.pt' for fold in range(cfg.n_splits)]
+        model_files = glob.glob(os.path.join(output_folder, 'model_best_fold*.pt'))
 
         # 各Foldのモデルで予測
         for model_file in model_files:
