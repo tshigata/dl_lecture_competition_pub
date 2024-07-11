@@ -37,36 +37,46 @@ from omegaconf import DictConfig, OmegaConf
 import wandb
 
 # ダミーデータの作成関数
-def create_dummy_data():
-    X = torch.randn(1000, 1, 271, 128)
+def create_dummy_data(use_resampling=False):
+    if use_resampling:
+        X = torch.randn(1000, 1, 271, 218)
+    else:
+        X = torch.randn(1000, 1, 271, 128)
     y = torch.randint(0, 1854, (1000,))
-    # X_test = torch.randn(100, 1, 271, 128)
     subject_idxs_train = torch.randint(0, 4, (1000,))
     return TensorDataset(X, y, subject_idxs_train)
 
 def print_tensor_info(tensor, tensor_name):
     print(f"{tensor_name}のShape:", tensor.shape)
 
-def load_data(data_dir, force_preprocess, use_baseline_correction=False):
-    # 前処理済みデータの保存パス
-    if not use_baseline_correction:
-        preprocessed_data_path = os.path.join(data_dir, 'preprocessed_data.pt')
-    else:
-        preprocessed_data_path = os.path.join(data_dir, 'preprocessed_data_b.pt')
+def load_data(data_dir, cfg):
 
-    if (not force_preprocess) and os.path.exists(preprocessed_data_path):
-        # 前処理済みデータが存在する場合、ロードする
-        X = torch.load(preprocessed_data_path)
-    else:
-        # 前処理済みデータが存在しない場合、元データをロードして前処理を行う
+    if not cfg.use_resampling:
         train_X = torch.load(os.path.join(data_dir, 'train_X.pt'))
         val_X = torch.load(os.path.join(data_dir, 'val_X.pt'))
         print_tensor_info(train_X, "train_X")
         print_tensor_info(val_X, "val_X")
-        X = torch.cat((train_X, val_X), dim=0)
-        # 前処理を行い、保存する
-        X = torch.tensor(preprocess_eeg_data(X.numpy(), use_baseline_correction), dtype=torch.float32).unsqueeze(1)
-        torch.save(X, preprocessed_data_path)
+        X = torch.cat((train_X.unsqueeze(1), val_X.unsqueeze(1)), dim=0)
+    else:
+        # 前処理済みデータの保存パス
+        if not cfg.use_baseline_correction:
+            preprocessed_data_path = os.path.join(data_dir, 'preprocessed_data.pt')
+        else:
+            preprocessed_data_path = os.path.join(data_dir, 'preprocessed_data_b.pt')
+
+        if (not cfg.force_preprocess) and os.path.exists(preprocessed_data_path):
+            # 前処理済みデータが存在する場合、ロードする
+            X = torch.load(preprocessed_data_path)
+        else:
+            # 前処理済みデータが存在しない場合、元データをロードして前処理を行う
+            train_X = torch.load(os.path.join(data_dir, 'train_X.pt'))
+            val_X = torch.load(os.path.join(data_dir, 'val_X.pt'))
+            print_tensor_info(train_X, "train_X")
+            print_tensor_info(val_X, "val_X")
+            X = torch.cat((train_X, val_X), dim=0)
+            # 前処理を行い、保存する
+            X = torch.tensor(preprocess_eeg_data(X.numpy(), cfg.use_baseline_correction), dtype=torch.float32).unsqueeze(1)
+            torch.save(X, preprocessed_data_path)
 
 
     train_y = torch.load(os.path.join(data_dir, 'train_y.pt'))
@@ -199,12 +209,22 @@ def set_random_seed(seed):
     torch.cuda.manual_seed_all(seed)  # GPUを使用する場合
     np.random.seed(seed)
     random.seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    # torch.backends.cudnn.deterministic = True
+    # torch.backends.cudnn.benchmark = False
 
 def weights_init(m):
     if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
         nn.init.kaiming_normal_(m.weight)
+
+import pickle
+def save_kfolds(kf, output_folder):
+    with open(os.path.join(output_folder, 'kfolds.pkl'), 'wb') as f:
+        pickle.dump(kf, f)
+
+def load_kfolds(output_folder):
+    with open(os.path.join(output_folder, 'kfolds.pkl'), 'rb') as f:
+        kf = pickle.load(f)
+    return kf
 
 def cross_validation_training(dataset, output_folder, cfg):
     max_val_acc_list = []
@@ -214,6 +234,9 @@ def cross_validation_training(dataset, output_folder, cfg):
         kf = StratifiedKFold(n_splits=cfg.n_splits, shuffle=True)
     else:
         kf = KFold(n_splits=cfg.n_splits, shuffle=True)
+
+    # 追試のためにKFoldを保存
+    save_kfolds(kf, output_folder)
 
     for fold, (train_index, val_index) in enumerate(kf.split(dataset, dataset.tensors[1])):
         cprint(f'Fold {fold+1}/{cfg.n_splits}', "yellow")
@@ -229,10 +252,11 @@ def cross_validation_training(dataset, output_folder, cfg):
         val_data = Subset(dataset, val_index)
         
         cprint(f"Train data: {len(train_data)} | Val data: {len(val_data)} | Batch size: {cfg.num_batches}", "light_blue")
-        # train_loader = DataLoader(train_data, batch_size=cfg.num_batches, shuffle=True, num_workers=2, pin_memory=True)
-        # val_loader = DataLoader(val_data, batch_size=cfg.num_batches, shuffle=False, num_workers=2, pin_memory=True)
         train_loader = DataLoader(train_data, batch_size=cfg.num_batches, shuffle=True)
         val_loader = DataLoader(val_data, batch_size=cfg.num_batches, shuffle=False)
+        # train_loader = DataLoader(train_data, batch_size=cfg.num_batches, shuffle=True, num_workers=2, pin_memory=True)
+        # val_loader = DataLoader(val_data, batch_size=cfg.num_batches, shuffle=False, num_workers=2, pin_memory=True)
+
         
         # モデルの定義
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -246,7 +270,7 @@ def cross_validation_training(dataset, output_folder, cfg):
             if cfg.optimizer == "Adam":
                 optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
             elif cfg.optimizer == "AdamW":
-                optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.02)
+                optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=0.02)
             else:
                 optimizer = torch.optim.SGD(model.parameters(), lr=cfg.learning_rate, momentum=0.9)
             cprint(optimizer, "light_blue")
@@ -254,7 +278,7 @@ def cross_validation_training(dataset, output_folder, cfg):
             if cfg.scheduler == "ReduceLROnPlateau":
                 scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.8, patience=3, min_lr=0.0001, verbose=True)
             else:
-                scheduler = CosineLRScheduler(optimizer, t_initial=120, lr_min=0.001, warmup_t=3, warmup_lr_init=0.001, warmup_prefix=True)
+                scheduler = CosineLRScheduler(optimizer, t_initial=cfg.t_initial, lr_min=cfg.lr_min, warmup_t=cfg.warmup_t, warmup_lr_init=cfg.warmup_lr_init, warmup_prefix=True)
             cprint(scheduler, "light_blue")
             
             early_stopping = EarlyStopping(patience=cfg.num_patience, verbose=True)
@@ -270,6 +294,9 @@ def cross_validation_training(dataset, output_folder, cfg):
             cprint(f"Fold {fold+1} max Acc = {max_val_acc}", "cyan")
             cprint("------------------------", "cyan")
 
+            if cfg.use_wandb:
+                wandb.log({'total_val_acc_mean': np.mean(max_val_acc_list)})
+            
             if not cfg.use_multi_seeds:
                 break
 
@@ -292,10 +319,10 @@ def run(cfg: DictConfig):
         wandb.init(mode="online", dir=logdir, project=cfg.wandb.project, notes=cfg.wandb.comment, config=config_dict)
          
     if cfg.dry_run:
-        dataset = create_dummy_data()
+        dataset = create_dummy_data(use_resampling=cfg.use_resampling)
     else:
         data_dir = cfg.data_dir
-        dataset = load_data(data_dir, cfg.force_preprocess, cfg.use_baseline_correction)
+        dataset = load_data(data_dir, cfg)
         
     max_val_acc = 0
     max_val_acc_list = []
