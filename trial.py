@@ -107,9 +107,6 @@ def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, scaler,
 
     train_loss, train_acc, val_loss, val_acc = [], [], [], []
 
-    # スケジューラとoptimizerによって設定された学習率を表示
-    print(f"Learning rate: {optimizer.param_groups[0]['lr']}")
-
     # トレーニングフェーズ
     model.train()
     for X, y, subject_idxs in tqdm(train_loader, desc=f'Epoch {epoch+1}/{cfg.num_epochs} Training'):
@@ -162,13 +159,15 @@ def train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimize
     scaler = GradScaler(enabled=cfg.use_amp)
 
     for epoch in range(cfg.num_epochs):
+        
+        # スケジューラとoptimizerによって設定された学習率を表示
+        print(f"Learning rate: {optimizer.param_groups[0]['lr']}")
+        if cfg.use_wandb:
+            wandb.log({f'learning rate': optimizer.param_groups[0]['lr'], 'epoch': epoch,'folds': fold})
+        
         train_loss, train_acc, val_loss, val_acc = train_and_validate_one_epoch(epoch, model, train_loader, val_loader, scaler, optimizer, scheduler, accuracy, device, cfg)
         if cfg.use_wandb:
             wandb.log({
-                # f'loss/train/fold-{fold}' if fold is not None else 'loss/train': train_loss,
-                # f'acc/train/fold-{fold}' if fold is not None else 'acc/train': train_acc,
-                # f'loss/validation/fold-{fold}' if fold is not None else 'loss/validation': val_loss,
-                # f'acc/validation/fold-{fold}' if fold is not None else 'acc/validation': val_acc,
                 f'train_loss/fold-{fold}' if fold is not None else 'train_loss/train': train_loss,
                 f'train_acc/fold-{fold}' if fold is not None else 'train_acc': train_acc,
                 f'val_loss/fold-{fold}' if fold is not None else 'val_loss': val_loss,

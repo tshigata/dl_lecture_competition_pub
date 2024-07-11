@@ -1,6 +1,6 @@
 wandb:
   project: "MEG-classification"
-  comment: "ベースライン補正＋３回"
+  comment: "Attention+R"
 
 dry_run: False
 use_wandb: True
@@ -37,7 +37,7 @@ target_rate: 32
 num_channels: 271  # チャンネル数
 num_timepoints: 128
 fs: 128
-use_baseline_correction: True
+use_baseline_correction: False
 
 # 交差検証
 splitter_name: KFold
@@ -48,7 +48,7 @@ optimizer: AdamW
 scheduler: CosineLRScheduler
 
 model_name: 
-selected_model_index: 6
+selected_model_index: 8
 model:
   - name: "EEGNet"
     params:
@@ -97,7 +97,20 @@ model:
       Samples: 128
       dropout_rate: 0.2
       num_subjects: 4
-
+  - name: "ImprovedEEGNet2"
+    params:
+      num_classes: 1854
+      Chans: 271
+      Samples: 128
+      dropout_rate: 0.5
+      num_subjects: 4
+  - name: "ImprovedEEGNet3"
+    params:
+      num_classes: 1854
+      Chans: 271
+      Samples: 128
+      dropout_rate: 0.5
+      num_subjects: 4
   # - name: "EEGNetWithAttention"
   #   params:
   #     num_classes: 1854
