@@ -1,9 +1,9 @@
 wandb:
   project: "MEG-classification"
-  comment: "オリジナルに戻す"
+  comment: "被験者ID注入"
 
 dry_run: False
-use_wandb: True
+use_wandb: False
 # use_pin_memory: True
 # use_non_blocking: True
 use_amp: True
@@ -54,7 +54,7 @@ warmup_lr_init: 0.0005
 
 
 model_name: 
-selected_model_index: 5
+selected_model_index: 6
 model:
   - name: "EEGNet"
     params:
@@ -90,6 +90,13 @@ model:
       dropout_rate: 0.5
       num_subjects: 4
   - name: "EEGNetWithSubjectBatchNormAll3"
+    params:
+      num_classes: 1854
+      Chans: 271
+      Samples: 128
+      dropout_rate: 0.5
+      num_subjects: 4
+  - name: "EEGNetWithSubjectBatchNormAll3SubjectInjection"
     params:
       num_classes: 1854
       Chans: 271

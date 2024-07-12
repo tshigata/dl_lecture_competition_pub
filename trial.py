@@ -92,7 +92,9 @@ def load_data(data_dir, cfg):
 
     # データの結合  
     y = torch.cat((train_y, val_y), dim=0)
-    subject_idxs_train = torch.cat((train_subject_idxs, val_subject_idxs), dim=0)
+    subject_idxs_train = torch.cat((train_subject_idxs, val_subject_idxs), dim=0) 
+    # torch.save(y, os.path.join(data_dir, 'train_val_y.pt'))
+    # torch.save(subject_idxs_train, os.path.join(data_dir, 'train_val_subject_idxs.pt'))
 
 
     dataset = TensorDataset(X, y, subject_idxs_train)
