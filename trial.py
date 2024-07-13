@@ -364,6 +364,8 @@ def run(cfg: DictConfig):
         # 保存されたモデルのファイル名のリスト
         # model_files = [f'model_best_fold{fold+1}.pt' for fold in range(cfg.n_splits)]
         model_files = glob.glob(os.path.join(output_folder, 'model_best_fold*.pt'))
+        #モデル名のリストを表示
+        
 
         # 各Foldのモデルで予測
         for model_file in model_files:

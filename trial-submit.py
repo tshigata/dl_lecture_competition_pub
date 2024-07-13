@@ -27,7 +27,7 @@ from src.preprocess import AugmentedDataset
 
 from src.models import *
 from src.utils import set_seed
-
+import glob
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
@@ -91,21 +91,21 @@ def load_data(data_dir, force_preprocess):
 
     return dataset
 
-model_classes = {
-    'EEGNet': EEGNet,
-    'EEGNetImproved': EEGNetImproved,
-    'EEGNetWithSubject': EEGNetWithSubject,
-    'EEGNetWithSubjectBatchNorm': EEGNetWithSubjectBatchNorm,
-    'ShallowConvNet': ShallowConvNet,
-    'DeepConvNet': DeepConvNet,
-    'ResNet18': ResNet18,
-    'LSTMModel': LSTMModel,
-    'CNNLSTM': CNNLSTM,
-    'DenseNet': DenseNet,
-    'GRUModel': GRUModel,
-    'InceptionNet': InceptionNet,
-    'EEGTransformerEncoder': EEGTransformerEncoder,
-}
+# model_classes = {
+#     'EEGNet': EEGNet,
+#     'EEGNetImproved': EEGNetImproved,
+#     'EEGNetWithSubject': EEGNetWithSubject,
+#     'EEGNetWithSubjectBatchNorm': EEGNetWithSubjectBatchNorm,
+#     'ShallowConvNet': ShallowConvNet,
+#     'DeepConvNet': DeepConvNet,
+#     'ResNet18': ResNet18,
+#     'LSTMModel': LSTMModel,
+#     'CNNLSTM': CNNLSTM,
+#     'DenseNet': DenseNet,
+#     'GRUModel': GRUModel,
+#     'InceptionNet': InceptionNet,
+#     'EEGTransformerEncoder': EEGTransformerEncoder,
+# }
 
 # 1エポック分の処理を関数化
 def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, optimizer, scheduler, accuracy, device, args):
@@ -222,11 +222,11 @@ def model_factory(models_config, selected_model_index):
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def run(cfg: DictConfig):
-    start_time = time.time()
+    # start_time = time.time()
     set_seed(cfg.seed)
-    logdir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    print(f"Log directory  : {logdir}")
-    save_folder_name = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+    # logdir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+    # print(f"Log directory  : {logdir}")
+    # save_folder_name = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
     
     # if cfg.use_wandb:
     #     # DictConfigを通常の辞書に変換
@@ -315,65 +315,68 @@ def run(cfg: DictConfig):
 
 
 # D:\Dev\DLBasic\Compe\dl_lecture_competition_pub\outputs\2024-07-09\11-54-00
-    save_folder_name = "outputs/2024-07-09/11-54-00"
-    if (not cfg.dry_run) and cfg.use_cv:
-        # モデルの定義
-
-
-        # テストデータを読み込む
-        test_X = torch.load('data/test_X.pt')
-        test_subject_idxs = torch.load('data/test_subject_idxs.pt')
-
-
-        test_X = torch.tensor(preprocess_eeg_data(test_X.numpy()), dtype=torch.float32).unsqueeze(1)
-
-        # テストデータセットとデータローダーの作成
-        test_dataset = TensorDataset(test_X, test_subject_idxs)
-        test_loader = DataLoader(test_dataset, batch_size=cfg.num_batches, shuffle=False)
-
-        # 予測結果を格納するリスト
-        predictions = []
+    save_folder_name = "outputs/2024-07-13/01-10-01"
 
         # モデルの定義
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        model = model_factory(cfg.model, cfg.selected_model_index).to(device)
-        print(model)
-        # モデルクラスの名前を表示
-        cprint(model.__class__.__name__, "light_blue")
 
 
-        # 保存されたモデルのファイル名のリスト
-        model_files = [f'model_best_fold{fold+1}.pt' for fold in range(cfg.n_splits)]  # 5-Foldの例
+    # テストデータを読み込む
+    test_X = torch.load('data/test_X.pt')
+    test_subject_idxs = torch.load('data/test_subject_idxs.pt')
 
-        # 各Foldのモデルで予測
-        for model_file in model_files:
-            # モデルのロード
-            model.load_state_dict(torch.load(os.path.join(save_folder_name, model_file), map_location=device))
-            model.eval()
+
+    test_X = torch.tensor(preprocess_eeg_data(test_X.numpy()), dtype=torch.float32).unsqueeze(1)
+
+    # テストデータセットとデータローダーの作成
+    test_dataset = TensorDataset(test_X, test_subject_idxs)
+    test_loader = DataLoader(test_dataset, batch_size=cfg.num_batches, shuffle=False)
+
+    # 予測結果を格納するリスト
+    predictions = []
+
+    # モデルの定義
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = model_factory(cfg.model, cfg.selected_model_index).to(device)
+    print(model)
+    # モデルクラスの名前を表示
+    cprint(model.__class__.__name__, "light_blue")
+
+
+    # 保存されたモデルのファイル名のリスト
+    # model_files = [f'model_best_fold{fold+1}.pt' for fold in range(cfg.n_splits)]  # 5-Foldの例
+    model_files = glob.glob(os.path.join(save_folder_name, 'model_best_fold*.pt'))
+    #モデル名のリストを表示
+    cprint(model_files, "light_blue")
+
+    # 各Foldのモデルで予測
+    for model_file in model_files:
+        # モデルのロード
+        model.load_state_dict(torch.load(model_file, map_location=device))
+        model.eval()
+        
+        fold_predictions = []
+        for X, subject_idxs, in test_loader:
+            X, subject_idxs = X.to(device), subject_idxs.to(device)
             
-            fold_predictions = []
-            for X, subject_idxs, in test_loader:
-                X, subject_idxs = X.to(device), subject_idxs.to(device)
-                
-                with torch.no_grad():
-                    # バッチごとのテストデータの予測
-                    pred = model(X, subject_idxs)
-                    fold_predictions.append(pred.cpu().numpy())
-            
-            #各Foldの予測結果を結合
-            predictions.append(np.concatenate(fold_predictions, axis=0))
+            with torch.no_grad():
+                # バッチごとのテストデータの予測
+                pred = model(X, subject_idxs)
+                fold_predictions.append(pred.cpu().numpy())
+        
+        #各Foldの予測結果を結合
+        predictions.append(np.concatenate(fold_predictions, axis=0))
 
-        # 予測結果の平均を計算
-        avg_predictions = np.mean(predictions, axis=0)
+    # 予測結果の平均を計算
+    avg_predictions = np.mean(predictions, axis=0)
 
-        # 平均化された予測結果を保存
-        mean_acc = 0.05538
-        submission_file_path = os.path.join(save_folder_name, f"submission_{mean_acc:.5f}.npy")
-        np.save(submission_file_path, avg_predictions)
-        cprint(f"Submission {avg_predictions.shape} saved at {submission_file_path}", "cyan")
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    print(f"Total run time: {elapsed_time:.2f} seconds")
+    # 平均化された予測結果を保存
+    mean_acc = 0.05538
+    submission_file_path = os.path.join(save_folder_name, f"submission_{mean_acc:.5f}.npy")
+    np.save(submission_file_path, avg_predictions)
+    cprint(f"Submission {avg_predictions.shape} saved at {submission_file_path}", "cyan")
+# end_time = time.time()
+# elapsed_time = end_time - start_time
+# print(f"Total run time: {elapsed_time:.2f} seconds")
 
 if __name__ == "__main__":
     run()

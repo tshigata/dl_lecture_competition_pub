@@ -108,7 +108,7 @@ model:
       num_classes: 1854
       Chans: 271
       Samples: 128
-      dropout_rate: 0.6
+      dropout_rate: 0.4
       num_subjects: 4
   - name: "ImprovedEEGNet"
     params:
