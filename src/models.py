@@ -628,7 +628,113 @@ class EEGNetWithSubjectBatchNormAll3SubjectInjection(nn.Module):
         x = self.classify(x)
         return x
 
-    
+
+
+import torch
+import torch.nn as nn
+from torch.utils.data import TensorDataset
+
+class EEGNetGRU(nn.Module):
+    def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5, num_subjects=4):
+        super(EEGNetGRU, self).__init__()
+        
+        self.subject_embedding = nn.Embedding(num_subjects, 16)
+
+        self.firstconv = nn.Sequential(
+            nn.Conv2d(1, 32, (1, 51), stride=(1, 1), padding=(0, 25), bias=False),
+            SubjectBatchNorm(32, num_subjects),
+            nn.ELU(),
+            nn.MaxPool2d((1, 2))
+        )
+
+        self.depthwiseConv = nn.Sequential(
+            nn.Conv2d(32, 64, (Chans, 1), stride=(1, 1), groups=32, bias=False),
+            SubjectBatchNorm(64, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv1 = nn.Sequential(
+            nn.Conv2d(64, 128, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            SubjectBatchNorm(128, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv2 = nn.Sequential(
+            nn.Conv2d(128, 256, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            SubjectBatchNorm(256, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+        self.separableConv3 = nn.Sequential(
+            nn.Conv2d(256, 512, (1, 7), stride=(1, 1), padding=(0, 3), bias=False),
+            SubjectBatchNorm(512, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.gru_input_size = 512
+        self.flattened_size = Samples // 2 // 2 // 2 // 2
+        
+        self.gru = nn.GRU(input_size=self.gru_input_size, hidden_size=256, num_layers=2, batch_first=True, dropout=dropout_rate)
+        
+        self.classify = nn.Sequential(
+            nn.Linear(256 + 16, 1024),  # GRUの出力に被験者埋め込みを結合
+            nn.ELU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(1024, 512),
+            nn.ELU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(512, num_classes)
+        )
+
+    def forward(self, x, subject_idxs):
+        subject_embeds = self.subject_embedding(subject_idxs)
+
+        x = self.firstconv[0](x)
+        x = self.firstconv[1](x, subject_idxs)
+        x = self.firstconv[2](x)
+        x = self.firstconv[3](x)
+        
+        x = self.depthwiseConv[0](x)
+        x = self.depthwiseConv[1](x, subject_idxs)
+        x = self.depthwiseConv[2](x)
+        x = self.depthwiseConv[3](x)
+        x = self.depthwiseConv[4](x)
+        
+        x = self.separableConv1[0](x)
+        x = self.separableConv1[1](x, subject_idxs)
+        x = self.separableConv1[2](x)
+        x = self.separableConv1[3](x)
+        x = self.separableConv1[4](x)
+        
+        x = self.separableConv2[0](x)
+        x = self.separableConv2[1](x, subject_idxs)
+        x = self.separableConv2[2](x)
+        x = self.separableConv2[3](x)
+        x = self.separableConv2[4](x)
+
+        x = self.separableConv3[0](x)
+        x = self.separableConv3[1](x, subject_idxs)
+        x = self.separableConv3[2](x)
+        x = self.separableConv3[3](x)
+        x = self.separableConv3[4](x)
+        
+        # Flatten the output for GRU
+        x = x.view(x.size(0), x.size(3), -1)
+        
+        # GRU
+        x, _ = self.gru(x)
+        x = x[:, -1, :]  # 最後の時間ステップの出力を使用
+        
+        x = torch.cat((x, subject_embeds), dim=1)
+        x = self.classify(x)
+        return x
 
 
 

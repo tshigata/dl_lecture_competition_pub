@@ -3,7 +3,7 @@ wandb:
   comment: "被験者ID注入"
 
 dry_run: False
-use_wandb: False
+use_wandb: True
 # use_pin_memory: True
 # use_non_blocking: True
 use_amp: True
@@ -24,7 +24,7 @@ num_patience: 30
 
 # データセット
 data_dir: data
-data_augmentation_train: True
+data_augmentation_train: False
 data_augmentation_test: False
 augmentation_prob: 0.2
 
@@ -54,7 +54,7 @@ warmup_lr_init: 0.0005
 
 
 model_name: 
-selected_model_index: 6
+selected_model_index: 7
 model:
   - name: "EEGNet"
     params:
@@ -94,7 +94,7 @@ model:
       num_classes: 1854
       Chans: 271
       Samples: 128
-      dropout_rate: 0.5
+      dropout_rate: 0.6
       num_subjects: 4
   - name: "EEGNetWithSubjectBatchNormAll3SubjectInjection"
     params:
@@ -102,6 +102,13 @@ model:
       Chans: 271
       Samples: 128
       dropout_rate: 0.5
+      num_subjects: 4
+  - name: "EEGNetGRU"
+    params:
+      num_classes: 1854
+      Chans: 271
+      Samples: 128
+      dropout_rate: 0.6
       num_subjects: 4
   - name: "ImprovedEEGNet"
     params:
