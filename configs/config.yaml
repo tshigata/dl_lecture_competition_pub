@@ -1,6 +1,6 @@
 wandb:
   project: "MEG-classification"
-  comment: "元のモデルでスコア確認"
+  comment: "model5の22交差"
 
 dry_run: False
 use_wandb: True
@@ -14,12 +14,15 @@ seed: 3711
 num_classes: 1854
 num_subjects: 4
 # num_epochs: 20
-num_epochs: 200
+num_epochs: 100
 # num_batches: 32
 num_batches: 128
 # num_batches: 256
 learning_rate: 0.001
-num_patience: 15
+num_patience: 12
+
+start_fold: 1
+output_folder: outputs/2024-07-14/01-30-09
 
 
 # データセット
@@ -29,7 +32,7 @@ data_augmentation_test: False
 augmentation_prob: 0.2
 
 # 前処理
-use_resampling: False
+use_resampling: True
 force_preprocess: False
 current_rate: 281
 lowcut: 0.5
@@ -43,14 +46,17 @@ use_baseline_correction: False
 # 交差検証
 splitter_name: KFold
 use_cv: True
-n_splits: 7
+n_splits: 22
 
 optimizer: AdamW
 scheduler: CosineLRScheduler
-t_initial: 60
-lr_min: 0.00005
-warmup_t: 2
+t_initial: 50
+# warmup_lr_init: 0.0005
+# warmup_t: 2
+# lr_min: 0.00005
 warmup_lr_init: 0.0005
+warmup_t: 2
+lr_min: 0.001
 
 
 model_name: 
@@ -94,7 +100,7 @@ model:
       num_classes: 1854
       Chans: 271
       Samples: 128
-      dropout_rate: 0.6
+      dropout_rate: 0.5
       num_subjects: 4
   - name: "EEGNetWithSubjectBatchNormAll3SubjectInjection"
     params:

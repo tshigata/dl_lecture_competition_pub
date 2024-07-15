@@ -66,16 +66,18 @@ def load_data(data_dir, cfg):
 
         if (not cfg.force_preprocess) and os.path.exists(preprocessed_data_path):
             # 前処理済みデータが存在する場合、ロードする
+            print("前処理済みデータをロードします")
             X = torch.load(preprocessed_data_path)
         else:
             # 前処理済みデータが存在しない場合、元データをロードして前処理を行う
+            print("テストデータを読み込みます")
             train_X = torch.load(os.path.join(data_dir, 'train_X.pt'))
             val_X = torch.load(os.path.join(data_dir, 'val_X.pt'))
             print_tensor_info(train_X, "train_X")
             print_tensor_info(val_X, "val_X")
             X = torch.cat((train_X, val_X), dim=0)
             # 前処理を行い、保存する
-            X = torch.tensor(preprocess_eeg_data(X.numpy(), cfg.use_baseline_correction), dtype=torch.float32).unsqueeze(1)
+            X = torch.tensor(preprocess_eeg_data(X.numpy()), dtype=torch.float32).unsqueeze(1)
             torch.save(X, preprocessed_data_path)
 
 
@@ -162,12 +164,13 @@ def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, scaler,
         scheduler.step(epoch)  # 学習率を調整
 
     # エポックの結果を表示
-    print(f"Epoch {epoch+1}/{cfg.num_epochs} | train loss: {np.mean(train_loss):.3f} | train acc: {np.mean(train_acc):.3f} | val loss: {np.mean(val_loss):.3f} | val acc: {np.mean(val_acc):.3f}")
+    print(f"Epoch {epoch+1}/{cfg.num_epochs} | train loss: {np.mean(train_loss):.3f} | train acc: {np.mean(train_acc):.3f} | val loss: {np.mean(val_loss):.5f} | val acc: {np.mean(val_acc):.5f}")
 
     return np.mean(train_loss), np.mean(train_acc), np.mean(val_loss), np.mean(val_acc)
 
 def train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimizer, scheduler, early_stopping, device, output_folder, cfg):
     max_val_acc = 0
+    min_val_loss = np.inf
     scaler = GradScaler(enabled=cfg.use_amp)
 
     for epoch in range(cfg.num_epochs):
@@ -191,10 +194,16 @@ def train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimize
             torch.save(model.state_dict(), os.path.join(output_folder, f"model_best_fold{fold+1}.pt" if fold is not None else "model_best.pt"))
             print(f"Initial model for Fold {fold+1} saved." if fold is not None else "Initial model saved.")
 
+            torch.save(model.state_dict(), os.path.join(output_folder, f"model_min_fold{fold+1}.pt" if fold is not None else "model_min.pt"))
+
         if val_acc > max_val_acc:
             max_val_acc = val_acc
             torch.save(model.state_dict(), os.path.join(output_folder, f"model_best_fold{fold+1}.pt" if fold is not None else "model_best.pt"))
-            cprint(f"New best for Fold {fold+1}/{cfg.n_splits}. Max Val Acc = {max_val_acc:.5f}", "cyan")
+            cprint(f"New acc best for Fold {fold+1}/{cfg.n_splits}. Max Val Acc = {max_val_acc:.5f}", "cyan")
+        if val_loss < min_val_loss:
+            min_val_loss = val_loss
+            torch.save(model.state_dict(), os.path.join(output_folder, f"model_min_fold{fold+1}.pt" if fold is not None else "model_min.pt"))
+            cprint(f"New min loss model for Fold {fold+1}/{cfg.n_splits}. Min Val Loss = {min_val_loss:.5f}", "cyan")
 
         if cfg.use_wandb:
             wandb.log({f'max_val_acc/fold-{fold}' if fold is not None else 'max_val_acc': max_val_acc, 'epoch': epoch, 'folds': fold if fold is not None else 'None'})
@@ -204,13 +213,13 @@ def train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimize
             print("Early stopping. Max Acc = ", max_val_acc)
             break
 
-    return max_val_acc
+    return max_val_acc, min_val_loss
 
 def set_random_seed(seed):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)  # GPUを使用する場合
-    np.random.seed(seed)
-    random.seed(seed)
+    # torch.manual_seed(seed)
+    # torch.cuda.manual_seed_all(seed)  # GPUを使用する場合
+    # np.random.seed(seed)
+    # random.seed(seed)
     # torch.backends.cudnn.deterministic = True
     # torch.backends.cudnn.benchmark = False
 
@@ -228,21 +237,110 @@ def load_kfolds(output_folder):
         kf = pickle.load(f)
     return kf
 
-def cross_validation_training(dataset, output_folder, cfg):
+def predict_testdata(fold, mean_acc, test_loader, output_folder, cfg):
+    # 予測結果を格納するリスト
+    predictions = []
+
+    # モデルの定義
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = model_factory(cfg.model, cfg.selected_model_index).to(device)
+    # print(model)
+    # モデルクラスの名前を表示
+    cprint(model.__class__.__name__, "light_blue")
+
+    # fold+1で指定した１つのモデルファイルを作成
+    model_file = f"model_best_fold{fold+1}.pt"
+
+    # モデルのロード
+    model.load_state_dict(torch.load(os.path.join(output_folder, model_file), map_location=device))
+    model.eval()
+    
+    fold_predictions = []
+    for X, subject_idxs, in test_loader:
+        X, subject_idxs = X.to(device), subject_idxs.to(device)
+        
+        with torch.no_grad():
+            # バッチごとのテストデータの予測
+            pred = model(X, subject_idxs)
+            fold_predictions.append(pred.cpu().numpy())
+    
+    #各Foldの予測結果を結合
+    predictions.append(np.concatenate(fold_predictions, axis=0))
+
+    # print(f"predictions shape: {predictions.shape}")
+
+    # 予測結果の平均を計算
+    avg_predictions = np.mean(predictions, axis=0)
+
+    # print(f"avg_predictions shape: {avg_predictions.shape}")
+
+    # 平均化された予測結果を保存
+    submission_file_path = os.path.join(output_folder, f"submission_{mean_acc:.5f}_fold{fold+1}_of_{cfg.n_splits}.npy")
+    np.save(submission_file_path, avg_predictions)
+    cprint(f"Submission {avg_predictions.shape} saved at {submission_file_path}", "cyan")
+
+def predict_testdata_min_loss(fold, min_val_loss, test_loader, output_folder, cfg):
+    # 予測結果を格納するリスト
+    predictions = []
+
+    # モデルの定義
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = model_factory(cfg.model, cfg.selected_model_index).to(device)
+    # print(model)
+    # モデルクラスの名前を表示
+    cprint(model.__class__.__name__, "light_blue")
+
+    # fold+1で指定した１つのモデルファイルを作成
+    model_file = f"model_min_fold{fold+1}.pt"
+
+    # モデルのロード
+    model.load_state_dict(torch.load(os.path.join(output_folder, model_file), map_location=device))
+    model.eval()
+    
+    fold_predictions = []
+    for X, subject_idxs, in test_loader:
+        X, subject_idxs = X.to(device), subject_idxs.to(device)
+        
+        with torch.no_grad():
+            # バッチごとのテストデータの予測
+            pred = model(X, subject_idxs)
+            fold_predictions.append(pred.cpu().numpy())
+    
+    #各Foldの予測結果を結合
+    predictions.append(np.concatenate(fold_predictions, axis=0))
+
+    #print(f"predictions shape: {predictions.shape}")
+
+    # 予測結果の平均を計算
+    avg_predictions = np.mean(predictions, axis=0)
+
+    # print(f"avg_predictions shape: {avg_predictions.shape}")
+
+    # 平均化された予測結果を保存
+    submission_file_path = os.path.join(output_folder, f"submission_{min_val_loss:.5f}_fold{fold+1}_min_loss.npy")
+    np.save(submission_file_path, avg_predictions)
+    cprint(f"Submission {avg_predictions.shape} saved at {submission_file_path}", "cyan")
+
+def cross_validation_training(dataset, test_loader, output_folder, cfg):
     max_val_acc_list = []
     fixed_seeds = [3711, 64, 128]  # 固定の3要素のリスト
 
-    if cfg.splitter_name == 'StratifiedKFold':
-        kf = StratifiedKFold(n_splits=cfg.n_splits, shuffle=True)
-    else:
-        kf = KFold(n_splits=cfg.n_splits, shuffle=True)
+    if cfg.start_fold == 0:
+        if cfg.splitter_name == 'StratifiedKFold':
+            kf = StratifiedKFold(n_splits=cfg.n_splits, shuffle=True)
+        else:
+            kf = KFold(n_splits=cfg.n_splits, shuffle=True)
 
-    # 追試のためにKFoldを保存
-    save_kfolds(kf, output_folder)
+        # 追試のためにKFoldを保存
+        save_kfolds(kf, output_folder)
+    else:
+        kf = load_kfolds(output_folder)
 
     for fold, (train_index, val_index) in enumerate(kf.split(dataset, dataset.tensors[1])):
+        if fold < cfg.start_fold:
+            continue  # start_foldより前のfoldはスキップ
+        
         cprint(f'Fold {fold+1}/{cfg.n_splits}', "yellow")
-
       
         # トレーニングデータと検証データに分割
         if cfg.data_augmentation_train:
@@ -290,11 +388,16 @@ def cross_validation_training(dataset, output_folder, cfg):
             cprint(f'Fold {fold+1}/{cfg.n_splits}, Session with Seed {seed}', "yellow")
             # ランダムシードの設定
             set_random_seed(seed)
-            max_val_acc = train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimizer, scheduler, early_stopping, device, output_folder, cfg)
+            max_val_acc,min_val_loss = train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimizer, scheduler, early_stopping, device, output_folder, cfg)
             max_val_acc_list.append(max_val_acc)
 
             cprint(f"Fold {fold+1} max Acc = {max_val_acc}", "cyan")
             cprint("------------------------", "cyan")
+
+            # Foldごとのテストデータの予測
+            predict_testdata(fold, max_val_acc, test_loader, output_folder, cfg)
+            predict_testdata_min_loss(fold, min_val_loss, test_loader, output_folder, cfg)
+
 
             if cfg.use_wandb:
                 wandb.log({'total_val_acc_mean': np.mean(max_val_acc_list)})
@@ -311,10 +414,16 @@ import glob
 def run(cfg: DictConfig):
     start_time = time.time()
     set_seed(cfg.seed)
-    logdir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    print(f"Log directory  : {logdir}")
-    output_folder = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+
+    output_folder = cfg.get("output_folder", None)
+    if not output_folder:
+        output_folder = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+        logdir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+    else:
+        logdir = cfg.output_folder
     
+    print(f"Output Folder: {output_folder},   Log directory: {logdir}")
+
     if cfg.use_wandb:
         # DictConfigを通常の辞書に変換
         config_dict = OmegaConf.to_container(cfg, resolve=True)
@@ -325,11 +434,29 @@ def run(cfg: DictConfig):
     else:
         data_dir = cfg.data_dir
         dataset = load_data(data_dir, cfg)
+
+        preprocessed_testdata_path = "data/preprocessed_testdata.pt"
+        if (not cfg.force_preprocess) and os.path.exists(preprocessed_testdata_path):
+            # 前処理済みデータが存在する場合、ロードする
+            print("前処理済みデータをロードします")
+            test_X = torch.load(preprocessed_testdata_path)
+        else:
+            # テストデータを読み込む
+            print("テストデータを読み込みます")
+            test_X = torch.load('data/test_X.pt')
+            test_X = torch.tensor(preprocess_eeg_data(test_X.numpy()), dtype=torch.float32).unsqueeze(1)
+            torch.save(test_X, preprocessed_testdata_path)
+        
+        test_subject_idxs = torch.load('data/test_subject_idxs.pt')
+
+        # テストデータセットとデータローダーの作成
+        test_dataset = TensorDataset(test_X, test_subject_idxs)
+        test_loader = DataLoader(test_dataset, batch_size=cfg.num_batches, shuffle=False)
         
     max_val_acc = 0
     max_val_acc_list = []
     
-    max_val_acc_list = cross_validation_training(dataset, output_folder, cfg)
+    max_val_acc_list = cross_validation_training(dataset, test_loader, output_folder, cfg)
 
     mean_acc = np.mean(max_val_acc_list)
 
@@ -337,61 +464,6 @@ def run(cfg: DictConfig):
         wandb.log({'total_val_acc_mean': mean_acc})
     cprint(f"Total Val Acc mean = {mean_acc} !", "cyan")
 
-    if not cfg.dry_run:
-        # モデルの定義
-
-        # テストデータを読み込む
-        test_X = torch.load('data/test_X.pt')
-        test_subject_idxs = torch.load('data/test_subject_idxs.pt')
-
-        test_X = torch.tensor(preprocess_eeg_data(test_X.numpy()), dtype=torch.float32).unsqueeze(1)
-
-        # テストデータセットとデータローダーの作成
-        test_dataset = TensorDataset(test_X, test_subject_idxs)
-        test_loader = DataLoader(test_dataset, batch_size=cfg.num_batches, shuffle=False)
-
-        # 予測結果を格納するリスト
-        predictions = []
-
-        # モデルの定義
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        model = model_factory(cfg.model, cfg.selected_model_index).to(device)
-        print(model)
-        # モデルクラスの名前を表示
-        cprint(model.__class__.__name__, "light_blue")
-
-
-        # 保存されたモデルのファイル名のリスト
-        # model_files = [f'model_best_fold{fold+1}.pt' for fold in range(cfg.n_splits)]
-        model_files = glob.glob(os.path.join(output_folder, 'model_best_fold*.pt'))
-        #モデル名のリストを表示
-        
-
-        # 各Foldのモデルで予測
-        for model_file in model_files:
-            # モデルのロード
-            model.load_state_dict(torch.load(os.path.join(output_folder, model_file), map_location=device))
-            model.eval()
-            
-            fold_predictions = []
-            for X, subject_idxs, in test_loader:
-                X, subject_idxs = X.to(device), subject_idxs.to(device)
-                
-                with torch.no_grad():
-                    # バッチごとのテストデータの予測
-                    pred = model(X, subject_idxs)
-                    fold_predictions.append(pred.cpu().numpy())
-            
-            #各Foldの予測結果を結合
-            predictions.append(np.concatenate(fold_predictions, axis=0))
-
-        # 予測結果の平均を計算
-        avg_predictions = np.mean(predictions, axis=0)
-
-        # 平均化された予測結果を保存
-        submission_file_path = os.path.join(output_folder, f"submission_{mean_acc:.5f}.npy")
-        np.save(submission_file_path, avg_predictions)
-        cprint(f"Submission {avg_predictions.shape} saved at {submission_file_path}", "cyan")
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"Total run time: {elapsed_time:.2f} seconds")

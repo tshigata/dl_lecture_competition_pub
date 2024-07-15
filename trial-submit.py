@@ -230,7 +230,7 @@ def run(cfg: DictConfig):
 
 
 # D:\Dev\DLBasic\Compe\dl_lecture_competition_pub\outputs\2024-07-09\11-54-00
-    save_folder_name = "outputs/2024-07-13/11-59-40"
+    save_folder_name = "outputs/2024-07-13/22-40-53"
 
     # テストデータを読み込む
     test_X = torch.load('data/test_X.pt')
@@ -256,6 +256,7 @@ def run(cfg: DictConfig):
     # 保存されたモデルのファイル名のリスト
     # model_files = [f'model_best_fold{fold+1}.pt' for fold in range(cfg.n_splits)]  # 5-Foldの例
     model_files = glob.glob(os.path.join(save_folder_name, 'model_best_fold*.pt'))
+    model_files = glob.glob(os.path.join(save_folder_name, 'model_min_fold*.pt'))
     #モデル名のリストを表示
     cprint(model_files, "light_blue")
 

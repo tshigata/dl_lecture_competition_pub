@@ -34,6 +34,7 @@ class EEGNet(nn.Module):
         
         self.classify = nn.Sequential(
             nn.Linear(32 * ((Samples // 32)), num_classes)
+            # nn.Linear(256, num_classes)
         )
 
     def forward(self, x, subject_idxs=None):
@@ -398,7 +399,7 @@ class EEGNetWithSubjectBatchNormAll(nn.Module):
 class EEGNetWithSubjectBatchNormAll3(nn.Module):
     def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5, num_subjects=4):
         super(EEGNetWithSubjectBatchNormAll3, self).__init__()
-        print(f"Samples: {Samples}", "Chans: {Chans}")
+        print(f"Chans: {Chans}, Samples: {Samples}")
         self.subject_embedding = nn.Embedding(num_subjects, 16)
 
         self.firstconv = nn.Sequential(
@@ -442,7 +443,8 @@ class EEGNetWithSubjectBatchNormAll3(nn.Module):
         self.flattened_size = 256 * ((Samples // 2 // 2 // 2))
         print(f"self.flattened_size: {self.flattened_size}")
         self.classify = nn.Sequential(
-            nn.Linear(self.flattened_size + 16, 1024),  # 隠れ層の次元を増加
+            # nn.Linear(self.flattened_size + 16, 1024),  # 隠れ層の次元を増加
+            nn.Linear(2064, 1024),  # 隠れ層の次元を増加
             # nn.Linear(3088, 1024),  # 隠れ層の次元を増加
             # nn.Linear(4112, 1024),  # 隠れ層の次元を増加
             nn.ELU(),
@@ -497,7 +499,7 @@ class EEGNetWithSubjectBatchNormAll3(nn.Module):
 class EEGNetWithSubjectBatchNormAll3SubjectInjection(nn.Module):
     def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5, num_subjects=4):
         super(EEGNetWithSubjectBatchNormAll3SubjectInjection, self).__init__()
-        print(f"Samples: {Samples}", f"Chans: {Chans}")
+        print(f"Samples: {Samples}, Chans: {Chans}")
         self.subject_embedding = nn.Embedding(num_subjects, 16)
 
         self.firstconv = nn.Sequential(
@@ -569,8 +571,9 @@ class EEGNetWithSubjectBatchNormAll3SubjectInjection(nn.Module):
         print(f"self.flattened_size: {self.flattened_size}")
 
         self.classify = nn.Sequential(
-            # nn.Linear(self.flattened_size + 16, 1024),  # 隠れ層の次元を増加
-            nn.Linear(4112, 1024),  # 隠れ層の次元を増加
+            nn.Linear(self.flattened_size + 16, 1024),  # 隠れ層の次元を増加
+            # nn.Linear(2064, 1024),  # 隠れ層の次元を増加
+            # nn.Linear(4112, 1024),  # 隠れ層の次元を増加
             nn.ELU(),
             nn.Dropout(dropout_rate),
             nn.Linear(1024, 512),
