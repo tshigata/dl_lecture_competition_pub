@@ -1,12 +1,12 @@
 wandb:
   project: "MEG-classification"
-  comment: "model5の22交差"
+  comment: ""
 
 dry_run: False
-use_wandb: True
+use_wandb: False
 # use_pin_memory: True
 # use_non_blocking: True
-use_amp: True
+use_amp: False
 use_multi_seeds: False
 device: cuda:0
 num_workers: 4
@@ -19,10 +19,11 @@ num_epochs: 100
 num_batches: 128
 # num_batches: 256
 learning_rate: 0.001
-num_patience: 12
+num_patience: 10
 
-start_fold: 1
-output_folder: outputs/2024-07-14/01-30-09
+start_fold: 0
+# start_fold: 1
+# output_folder: outputs/2024-07-14/01-30-09
 
 
 # データセット
@@ -45,8 +46,8 @@ use_baseline_correction: False
 
 # 交差検証
 splitter_name: KFold
-use_cv: True
-n_splits: 22
+use_cv: False
+n_splits: 5
 
 optimizer: AdamW
 scheduler: CosineLRScheduler
@@ -60,7 +61,7 @@ lr_min: 0.001
 
 
 model_name: 
-selected_model_index: 5
+selected_model_index: 7
 model:
   - name: "EEGNet"
     params:
@@ -103,6 +104,13 @@ model:
       dropout_rate: 0.5
       num_subjects: 4
   - name: "EEGNetWithSubjectBatchNormAll3SubjectInjection"
+    params:
+      num_classes: 1854
+      Chans: 271
+      Samples: 128
+      dropout_rate: 0.5
+      num_subjects: 4
+  - name: "EEGNetWithSubjectBatchNormAll4"
     params:
       num_classes: 1854
       Chans: 271

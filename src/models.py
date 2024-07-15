@@ -6,7 +6,7 @@ import torchvision.models as models
 from termcolor import cprint
 
 # EEGNetのモデル定義
-class EEGNet(nn.Module):
+class EEGNet(nn.Module): # index=0
     def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.25):
         super(EEGNet, self).__init__()
         cprint(f"dropout_rate = {dropout_rate}", "light_blue")
@@ -47,7 +47,7 @@ class EEGNet(nn.Module):
         x = self.classify(x)
         return x
 
-class EEGNetImproved(nn.Module):
+class EEGNetImproved(nn.Module): # index=1
     def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5):
         super(EEGNetImproved, self).__init__()
 
@@ -100,7 +100,7 @@ class EEGNetImproved(nn.Module):
         x = self.classify(x)
         return x
 
-class EEGNetWithSubject(nn.Module):
+class EEGNetWithSubject(nn.Module): # index=2  被験者IDのエンベッディング層を追加
     def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5, num_subjects=4):
         super(EEGNetWithSubject, self).__init__()
         
@@ -157,7 +157,7 @@ class EEGNetWithSubject(nn.Module):
         return x
 
    
-class SubjectBatchNorm(nn.Module):
+class SubjectBatchNorm(nn.Module): 
     def __init__(self, num_features, num_subjects):
         super(SubjectBatchNorm, self).__init__()
         self.num_subjects = num_subjects
@@ -170,7 +170,7 @@ class SubjectBatchNorm(nn.Module):
             out += self.bns[i](x) * mask
         return out
 
-class EEGNetWithSubjectBatchNorm(nn.Module):
+class EEGNetWithSubjectBatchNorm(nn.Module): # index=3 BatchNormをSubjectID毎に分ける
     def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5, num_subjects=4):
         super(EEGNetWithSubjectBatchNorm, self).__init__()
         
@@ -199,6 +199,7 @@ class EEGNetWithSubjectBatchNorm(nn.Module):
             nn.Dropout(dropout_rate)
         )
 
+        # 2層目の追加
         self.separableConv2 = nn.Sequential(
             nn.Conv2d(128, 256, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
             SubjectBatchNorm(256, num_subjects),
@@ -247,8 +248,7 @@ class EEGNetWithSubjectBatchNorm(nn.Module):
 
 
 
-
-class EGNetWithSubjectBatchNormAdd(nn.Module):
+class EGNetWithSubjectBatchNormAdd(nn.Module):# index=4 畳み込み層を追加
     def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5, num_subjects=4):
         super(EGNetWithSubjectBatchNormAdd, self).__init__()
         
@@ -395,8 +395,7 @@ class EEGNetWithSubjectBatchNormAll(nn.Module):
         x = self.classify(x)
         return x
     
-
-class EEGNetWithSubjectBatchNormAll3(nn.Module):
+class EEGNetWithSubjectBatchNormAll3(nn.Module):  # index=5
     def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5, num_subjects=4):
         super(EEGNetWithSubjectBatchNormAll3, self).__init__()
         print(f"Chans: {Chans}, Samples: {Samples}")
@@ -432,6 +431,7 @@ class EEGNetWithSubjectBatchNormAll3(nn.Module):
             nn.AvgPool2d((1, 2), stride=(1, 2)),
             nn.Dropout(dropout_rate)
         )
+        # 3層目の追加
         self.separableConv3 = nn.Sequential(
             nn.Conv2d(256, 512, (1, 7), stride=(1, 1), padding=(0, 3), bias=False),
             SubjectBatchNorm(512, num_subjects),
@@ -486,6 +486,123 @@ class EEGNetWithSubjectBatchNormAll3(nn.Module):
         x = self.separableConv3[2](x)
         x = self.separableConv3[3](x)
         x = self.separableConv3[4](x)
+        
+        # print(f"x.shape1: {x.shape}")
+        x = x.view(x.size(0), -1)
+        # print(f"x.shape2: {x.shape}")
+        x = torch.cat((x, subject_embeds), dim=1)
+        # print(f"x.shape3: {x.shape}")
+        x = self.classify(x)
+        # print(f"x.shape4: {x.shape}")
+        return x
+    
+
+class EEGNetWithSubjectBatchNormAll4(nn.Module):  # index=5
+    def __init__(self, num_classes, Chans=271, Samples=128, dropout_rate=0.5, num_subjects=4):
+        super(EEGNetWithSubjectBatchNormAll4, self).__init__()
+        print(f"Chans: {Chans}, Samples: {Samples}")
+        self.subject_embedding = nn.Embedding(num_subjects, 16)
+
+        self.firstconv = nn.Sequential(
+            nn.Conv2d(1, 32, (1, 51), stride=(1, 1), padding=(0, 25), bias=False),
+            SubjectBatchNorm(32, num_subjects),
+            nn.ELU(),
+            nn.MaxPool2d((1, 2))
+        )
+
+        self.depthwiseConv = nn.Sequential(
+            nn.Conv2d(32, 64, (Chans, 1), stride=(1, 1), groups=32, bias=False),
+            SubjectBatchNorm(64, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv1 = nn.Sequential(
+            nn.Conv2d(64, 128, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            SubjectBatchNorm(128, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.separableConv2 = nn.Sequential(
+            nn.Conv2d(128, 256, (1, 15), stride=(1, 1), padding=(0, 7), bias=False),
+            SubjectBatchNorm(256, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+        # 3層目の追加
+        self.separableConv3 = nn.Sequential(
+            nn.Conv2d(256, 512, (1, 7), stride=(1, 1), padding=(0, 3), bias=False),
+            SubjectBatchNorm(512, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        # 4層目の追加
+        self.separableConv4 = nn.Sequential(
+            nn.Conv2d(512, 1024, (1, 7), stride=(1, 1), padding=(0, 3), bias=False),
+            SubjectBatchNorm(1024, num_subjects),
+            nn.ELU(),
+            nn.AvgPool2d((1, 2), stride=(1, 2)),
+            nn.Dropout(dropout_rate)
+        )
+
+        self.flattened_size = 256 * ((Samples // 2 // 2 // 2))
+        print(f"self.flattened_size: {self.flattened_size}")
+        self.classify = nn.Sequential(
+            # nn.Linear(self.flattened_size + 16, 1024),  # 隠れ層の次元を増加
+            nn.Linear(2064, 1024),  # 隠れ層の次元を増加
+            # nn.Linear(3088, 1024),  # 隠れ層の次元を増加
+            # nn.Linear(4112, 1024),  # 隠れ層の次元を増加
+            nn.ELU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(1024, 512),
+            nn.ELU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(512, num_classes)
+        )
+
+    def forward(self, x, subject_idxs):
+        subject_embeds = self.subject_embedding(subject_idxs)
+
+        x = self.firstconv[0](x)
+        x = self.firstconv[1](x, subject_idxs) # batchnormに被験者IDを渡す
+        x = self.firstconv[2](x)
+        x = self.firstconv[3](x)
+        
+        x = self.depthwiseConv[0](x)
+        x = self.depthwiseConv[1](x, subject_idxs)
+        x = self.depthwiseConv[2](x)
+        x = self.depthwiseConv[3](x)
+        x = self.depthwiseConv[4](x)
+        
+        x = self.separableConv1[0](x)
+        x = self.separableConv1[1](x, subject_idxs)
+        x = self.separableConv1[2](x)
+        x = self.separableConv1[3](x)
+        x = self.separableConv1[4](x)
+        
+        x = self.separableConv2[0](x)
+        x = self.separableConv2[1](x, subject_idxs)
+        x = self.separableConv2[2](x)
+        x = self.separableConv2[3](x)
+        x = self.separableConv2[4](x)
+
+        x = self.separableConv3[0](x)
+        x = self.separableConv3[1](x, subject_idxs)
+        x = self.separableConv3[2](x)
+        x = self.separableConv3[3](x)
+        x = self.separableConv3[4](x)
+
+        x = self.separableConv4[0](x)
+        x = self.separableConv4[1](x, subject_idxs)
+        x = self.separableConv4[2](x)
+        x = self.separableConv4[3](x)
+        x = self.separableConv4[4](x)
         
         # print(f"x.shape1: {x.shape}")
         x = x.view(x.size(0), -1)

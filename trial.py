@@ -128,21 +128,22 @@ def train_and_validate_one_epoch(epoch, model, train_loader, val_loader, scaler,
 
         optimizer.zero_grad()
 
-        # AMPの使用
-        if cfg.use_amp:
-            with torch.cuda.amp.autocast():
-                y_pred = model(X, subject_idxs)
-                loss = F.cross_entropy(y_pred, y)
-        else:
-            y_pred = model(X, subject_idxs)
-            loss = F.cross_entropy(y_pred, y)
-
+        # # AMPの使用
+        # if cfg.use_amp:
+        #     with torch.cuda.amp.autocast():
+        #         y_pred = model(X, subject_idxs)
+        #         loss = F.cross_entropy(y_pred, y)
+        # else:
+        #     y_pred = model(X, subject_idxs)
+        #     loss = F.cross_entropy(y_pred, y)
+        y_pred = model(X, subject_idxs)
+        loss = F.cross_entropy(y_pred, y)
         train_loss.append(loss.item())
-        # loss.backward()
-        scaler.scale(loss).backward()
-        # optimizer.step()
-        scaler.step(optimizer)
-        scaler.update()
+        loss.backward()
+        # scaler.scale(loss).backward()
+        optimizer.step()
+        # scaler.step(optimizer)
+        # scaler.update()
 
         acc = accuracy(y_pred, y)
         train_acc.append(acc.item())
@@ -215,13 +216,13 @@ def train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimize
 
     return max_val_acc, min_val_loss
 
-def set_random_seed(seed):
-    # torch.manual_seed(seed)
-    # torch.cuda.manual_seed_all(seed)  # GPUを使用する場合
-    # np.random.seed(seed)
-    # random.seed(seed)
-    # torch.backends.cudnn.deterministic = True
-    # torch.backends.cudnn.benchmark = False
+# def set_random_seed(seed):
+#     # torch.manual_seed(seed)
+#     # torch.cuda.manual_seed_all(seed)  # GPUを使用する場合
+#     # np.random.seed(seed)
+#     # random.seed(seed)
+#     # torch.backends.cudnn.deterministic = True
+#     # torch.backends.cudnn.benchmark = False
 
 def weights_init(m):
     if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
@@ -387,7 +388,7 @@ def cross_validation_training(dataset, test_loader, output_folder, cfg):
         
             cprint(f'Fold {fold+1}/{cfg.n_splits}, Session with Seed {seed}', "yellow")
             # ランダムシードの設定
-            set_random_seed(seed)
+            # set_random_seed(seed)
             max_val_acc,min_val_loss = train_and_evaluate(model, fold, train_loader, val_loader, accuracy, optimizer, scheduler, early_stopping, device, output_folder, cfg)
             max_val_acc_list.append(max_val_acc)
 
