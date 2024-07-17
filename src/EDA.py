@@ -102,7 +102,7 @@ print(val_y[:100])
 # plt.ylabel('Amplitude')
 # plt.show()
 
-#train_Xは、271x281の脳波波形です。1枚のデータを縦に積み上げて、一度に表示したいです。1個目のデータを使い、脳波波形を縦に並べて表示
+#
 plt.figure(figsize=(10, 5))
 plt.plot(train_dataset.X[0].T)
 plt.title('Train Dataset X[0]')
