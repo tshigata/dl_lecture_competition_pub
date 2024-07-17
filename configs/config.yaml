@@ -1,16 +1,16 @@
 wandb:
   project: "MEG-classification"
-  comment: ""
+  comment: "12 split"
 
 dry_run: False
-use_wandb: False
+use_wandb: True
 # use_pin_memory: True
 # use_non_blocking: True
 use_amp: False
 use_multi_seeds: False
 device: cuda:0
 num_workers: 4
-seed: 3711
+seed: 521
 num_classes: 1854
 num_subjects: 4
 # num_epochs: 20
@@ -19,7 +19,7 @@ num_epochs: 100
 num_batches: 128
 # num_batches: 256
 learning_rate: 0.001
-num_patience: 10
+num_patience: 12
 
 start_fold: 0
 # start_fold: 1
@@ -44,24 +44,26 @@ num_timepoints: 128
 fs: 128
 use_baseline_correction: False
 
+use_label_smoothing: False
+
 # 交差検証
 splitter_name: KFold
-use_cv: False
-n_splits: 5
+use_cv: True
+n_splits: 12
 
 optimizer: AdamW
 scheduler: CosineLRScheduler
-t_initial: 50
+t_initial: 100
 # warmup_lr_init: 0.0005
 # warmup_t: 2
 # lr_min: 0.00005
 warmup_lr_init: 0.0005
-warmup_t: 2
-lr_min: 0.001
+warmup_t: 1
+lr_min: 0.0008
 
 
 model_name: 
-selected_model_index: 7
+selected_model_index: 5
 model:
   - name: "EEGNet"
     params:

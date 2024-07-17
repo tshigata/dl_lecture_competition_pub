@@ -46,6 +46,34 @@ def create_dummy_data(use_resampling=False):
     subject_idxs_train = torch.randint(0, 4, (1000,))
     return TensorDataset(X, y, subject_idxs_train)
 
+def label_smoothing(true_label, num_classes, epsilon=0.1):
+    """
+    ラベルスムージングを行う関数
+
+    Parameters:
+    true_label (int): 正解ラベルのインデックス
+    num_classes (int): クラスの総数
+    epsilon (float): スムージングパラメータ
+
+    Returns:
+    np.array: スムージングされたラベル
+    """
+    # すべてのラベルに小さな値を割り当てる
+    labels = np.ones(num_classes) * (epsilon / (num_classes - 1))
+    # 正解ラベルに大きな値を割り当てる
+    labels[true_label] = 1 - epsilon
+    return labels
+
+# ラベルスムージングを適用する関数
+def apply_label_smoothing(dataset, num_classes, epsilon=0.1):
+    for i in range(len(dataset)):
+        # ここでは、dataset[i]がデータとラベルのタプルであると仮定しています
+        data, true_label = dataset[i]
+        smoothed_label = label_smoothing(true_label, num_classes, epsilon)
+        # スムージングされたラベルでデータセットを更新
+        dataset[i] = (data, smoothed_label)
+    return dataset
+
 def print_tensor_info(tensor, tensor_name):
     print(f"{tensor_name}のShape:", tensor.shape)
 
@@ -97,6 +125,9 @@ def load_data(data_dir, cfg):
     subject_idxs_train = torch.cat((train_subject_idxs, val_subject_idxs), dim=0) 
     # torch.save(y, os.path.join(data_dir, 'train_val_y.pt'))
     # torch.save(subject_idxs_train, os.path.join(data_dir, 'train_val_subject_idxs.pt'))
+          
+    if cfg.use_label_smoothing:
+        y = apply_label_smoothing(y, cfg.num_classes, epsilon=0.1)
 
 
     dataset = TensorDataset(X, y, subject_idxs_train)
