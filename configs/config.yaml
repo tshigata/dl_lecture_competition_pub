@@ -21,9 +21,9 @@ num_batches: 128
 learning_rate: 0.001
 num_patience: 12
 
-start_fold: 0
+start_fold: 16
 # start_fold: 1
-# output_folder: outputs/2024-07-14/01-30-09
+output_folder: outputs/2024-07-14/01-30-09
 
 
 # データセット
@@ -49,7 +49,7 @@ use_label_smoothing: False
 # 交差検証
 splitter_name: KFold
 use_cv: False
-n_splits: 5
+n_splits: 22
 
 optimizer: AdamW
 scheduler: CosineLRScheduler
@@ -63,7 +63,7 @@ lr_min: 0.0008
 
 
 model_name: 
-selected_model_index: 3
+selected_model_index: 5
 model:
   - name: "EEGNet"
     params:
